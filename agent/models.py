@@ -17,8 +17,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-ALLOWED_KEYS = {"comment", "tool", "arguments", "done", "summary"}
-
 
 def truncate(text: str, max_chars: int, marker: str = "... [truncated]") -> str:
     """Truncate ``text`` to ``max_chars``, appending ``marker`` when clipped."""
@@ -32,8 +30,10 @@ def truncate(text: str, max_chars: int, marker: str = "... [truncated]") -> str:
 
 def _strip_fences(text: str) -> str:
     text = text.strip()
-    if re.match(r"^```(?:json)?\s*$", text.splitlines()[0], re.IGNORECASE):
-        lines = text.splitlines()
+    lines = text.splitlines()
+    if not lines:
+        return ""
+    if re.match(r"^```(?:json)?\s*$", lines[0], re.IGNORECASE):
         if lines[-1].strip().startswith("```"):
             return "\n".join(lines[1:-1]).strip()
     return text
@@ -140,13 +140,11 @@ def tool_result_message(tool_result: "ToolResult") -> dict[str, str]:
     Tool results are sent with the ``user`` role for maximum compatibility
     with small local models (some builds mishandle the ``tool`` role).
     """
-    return {"role": "user", "content": _TOOL_RESULT_PREFIX.format(**vars(tool_result))}
-
-
-_TOOL_RESULT_PREFIX = (
-    "Tool result for {name} "
-    "({'ok' if ok else 'FAILED'}):\n{output}"
-)
+    status = "OK" if tool_result.ok else "FAILED"
+    content = (
+        f"Tool result for {tool_result.name} ({status}):\n{tool_result.output}"
+    )
+    return {"role": "user", "content": content}
 
 
 class ToolResult:

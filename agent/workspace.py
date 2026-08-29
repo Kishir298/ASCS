@@ -36,15 +36,6 @@ IGNORED_NAMES = {
 
 IGNORED_SUFFIXES = (".egg-info",)
 
-# Extensions treated as non-text for read_file purposes (binary guard).
-BINARY_EXTENSIONS = {
-    ".exe", ".dll", ".so", ".dylib", ".bin", ".o", ".a", ".lib",
-    ".pyc", ".pyo", ".pyd", ".whl", ".zip", ".tar", ".gz", ".bz2",
-    ".xz", ".7z", ".rar", ".png", ".jpg", ".jpeg", ".gif", ".bmp",
-    ".webp", ".ico", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt",
-    ".pptx", ".db", ".sqlite", ".sqlite3", ".lock",
-}
-
 
 class WorkspaceError(Exception):
     """Raised for any workspace boundary violation or bad path."""
@@ -59,7 +50,10 @@ def should_ignore(name: str) -> bool:
 
 class Workspace:
     def __init__(self, root: str | os.PathLike[str]) -> None:
-        self._root = Path(root).expanduser().resolve(strict=True)
+        try:
+            self._root = Path(root).expanduser().resolve(strict=True)
+        except (FileNotFoundError, OSError) as exc:
+            raise WorkspaceError(f"Workspace root is not accessible: {root!r}") from exc
         if not self._root.is_dir():
             raise WorkspaceError(f"Workspace root is not a directory: {self._root}")
 

@@ -331,6 +331,29 @@ def _run_command(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
     )
 
 
+def _terminate_tree(proc: subprocess.Popen) -> None:
+    """Force-kill ``proc`` and (on Windows) its descendant process tree.
+
+    A plain ``proc.kill()`` on Windows only terminates the intermediate
+    ``cmd.exe``; grandchildren (the actual command) would keep running. Using
+    ``taskkill /T /F`` kills the whole tree.
+    """
+    if os.name == "nt" and proc.poll() is None:
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                timeout=10,
+            )
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
 def _execute_process(
     command: str, cwd: Path, timeout: int
 ) -> tuple[subprocess.Popen, str, str, int | None, bool, bool]:
@@ -358,15 +381,12 @@ def _execute_process(
             except subprocess.TimeoutExpired:
                 if time.monotonic() - start > timeout:
                     timed_out = True
-                    proc.kill()
+                    _terminate_tree(proc)
                     stdout, stderr = proc.communicate()
                     break
     except KeyboardInterrupt:
         killed = True
-        try:
-            proc.kill()
-        except OSError:
-            pass
+        _terminate_tree(proc)
         try:
             proc.communicate()
         except Exception:  # pragma: no cover - defensive
@@ -610,9 +630,17 @@ def execute_tool(
     return result
 
 
-def tool_schema_text() -> str:
-    """Render the full tool reference for the system prompt."""
-    return "\n".join(spec.prompt_text() for spec in TOOL_SPECS.values())
+def tool_schema_text(names: list[str] | None = None) -> str:
+    """Render the tool reference for the system prompt.
+
+    Renders every registered tool when ``names`` is None, otherwise only the
+    named tools (which must exist in the registry).
+    """
+    if names is None:
+        specs = TOOL_SPECS.values()
+    else:
+        specs = [TOOL_SPECS[name] for name in names]
+    return "\n".join(spec.prompt_text() for spec in specs)
 
 
 # -- binary detection -------------------------------------------------------
@@ -622,7 +650,7 @@ _BINARY_SUFFIXES = {
     ".pyc", ".pyo", ".pyd", ".whl", ".zip", ".tar", ".gz", ".bz2", ".xz",
     ".7z", ".rar", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".db",
-    ".sqlite", ".sqlite3", ".lock",
+    ".sqlite", ".sqlite3",
 }
 
 

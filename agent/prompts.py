@@ -9,7 +9,16 @@ from __future__ import annotations
 import datetime
 
 from .config import AgentConfig
-from .tools import tool_schema_text
+from .tools import TOOL_SPECS, tool_schema_text
+
+
+def _enabled_tool_text(config: AgentConfig) -> str:
+    """Render the prompt reference using only session-enabled tools."""
+    names = [name for name in config.tools if name in TOOL_SPECS]
+    if len(names) != len(config.tools):
+        missing = set(config.tools) - set(names)
+        raise ValueError(f"config.tools contains unknown tools: {sorted(missing)}")
+    return tool_schema_text(names)
 
 
 def system_prompt(config: AgentConfig) -> str:
@@ -18,6 +27,7 @@ def system_prompt(config: AgentConfig) -> str:
         "- MODE: SAFE. Before executing write_file, apply_patch, or "
         "run_command you may be prompted for approval by the operator."
     )
+    tools = _enabled_tool_text(config)
     return f"""You are RISARMS coding agent, an autonomous local coding assistant.
 
 Current date: {today}
