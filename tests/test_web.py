@@ -252,6 +252,33 @@ def test_app_status_cached_within_ttl(tmp_path):
     assert probes["n"] == 2
 
 
+def test_app_warm_status_prepopulates_cache(tmp_path):
+    probes = {"n": 0}
+
+    class CountingClient:
+        model = "fake-model"
+        keep_alive = None
+
+        def check_connectivity(self, timeout=None):
+            probes["n"] += 1
+
+        def list_models(self, timeout=None):
+            return []
+
+        def abort_current(self):
+            pass
+
+    cfg = AgentConfig(workspace=tmp_path, mode="AUTO")
+    app = App(cfg, CountingClient(), Workspace(tmp_path))
+    app.warm_status()
+    assert probes["n"] == 1
+    assert app.status()["ollama"]["reachable"] is True
+    assert probes["n"] == 1  # served from cache, no second live probe
+    app.status()
+    app.status()
+    assert probes["n"] == 1  # still cached inside the TTL window
+
+
 def test_http_endpoints_smoke(tmp_path):
     app = _app(tmp_path, ['{"done": true, "summary": "web task done"}'])
     url = app.start()

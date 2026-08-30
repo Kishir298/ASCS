@@ -232,11 +232,15 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _send_json(self, status: int, payload: Any) -> None:
         body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+        except OSError:
+            self.close_connection = True  # client went away mid-response
 
     def _read_json(self) -> dict[str, Any]:
         try:
@@ -254,11 +258,15 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _send_asset(self) -> None:
         html = _load_index().encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(html)))
-        self.end_headers()
-        self.wfile.write(html)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+            self.wfile.flush()
+        except OSError:
+            self.close_connection = True
 
     # -- routing ------------------------------------------------------------
 
@@ -392,8 +400,15 @@ class App:
     def bind(self) -> str:
         """Bind the server (non-blocking); returns the URL."""
         self._server = ASCSHTTPServer((self.config.ui_host, self.config.ui_port), self)
+        self.warm_status()
         host, port = self._server.server_address[:2]
         return f"http://127.0.0.1:{port}"
+
+    def warm_status(self) -> None:
+        """Probe Ollama once at startup so the very first /api/status is fast."""
+        with self._status_lock:
+            self._status_cache = self._probe_status()
+            self._status_at = _time.monotonic()
 
     def serve_forever(self) -> None:
         if self._server is not None:
