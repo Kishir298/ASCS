@@ -371,6 +371,10 @@ class ASCSHTTPServer(ThreadingHTTPServer):
 class App:
     """State + runner + hub behind the HTTP server."""
 
+    # Freshness window for cached Ollama status (the UI polls /api/status
+    # every 1.5s; probing Ollama live on every poll would hammer the server).
+    STATUS_TTL = 2.0
+
     def __init__(self, config: AgentConfig, client: Any, workspace: Workspace) -> None:
         self.config = config
         self.client = client
@@ -379,6 +383,9 @@ class App:
         self.runner = TaskRunner(config, client, workspace, self.hub)
         self._shutdown = threading.Event()
         self._server: ASCSHTTPServer | None = None
+        self._status_cache: dict[str, Any] = {}
+        self._status_at = 0.0
+        self._status_lock = threading.Lock()
 
     # -- HTTP server lifecycle ---------------------------------------------
 
@@ -434,6 +441,19 @@ class App:
         return data
 
     def status(self) -> dict[str, Any]:
+        """Ollama + UI status, cached briefly so frequent polls don't hammer the
+        model server with live probes."""
+        now = _time.monotonic()
+        with self._status_lock:
+            if now - self._status_at < self.STATUS_TTL and self._status_cache:
+                return dict(self._status_cache)
+        payload = self._probe_status()
+        with self._status_lock:
+            self._status_cache = payload
+            self._status_at = now
+        return payload
+
+    def _probe_status(self) -> dict[str, Any]:
         try:
             self.client.check_connectivity(timeout=3)
             ollama_up = True

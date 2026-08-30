@@ -223,6 +223,35 @@ def test_app_status_handles_offline_ollama(tmp_path):
     assert status["ollama"]["installed"] == []
 
 
+def test_app_status_cached_within_ttl(tmp_path):
+    probes = {"n": 0}
+
+    class CountingClient:
+        model = "fake-model"
+        keep_alive = None
+
+        def check_connectivity(self, timeout=None):
+            probes["n"] += 1
+            raise ConnectionError("offline")
+
+        def list_models(self, timeout=None):
+            return []
+
+        def abort_current(self):
+            pass
+
+    cfg = AgentConfig(workspace=tmp_path, mode="AUTO")
+    app = App(cfg, CountingClient(), Workspace(tmp_path))
+    app.status()
+    app.status()
+    app.status()
+    assert probes["n"] == 1  # live probe performed once per TTL window
+    # Force a fresh probe after the window elapses.
+    app._status_at = 0.0
+    app.status()
+    assert probes["n"] == 2
+
+
 def test_http_endpoints_smoke(tmp_path):
     app = _app(tmp_path, ['{"done": true, "summary": "web task done"}'])
     url = app.start()
