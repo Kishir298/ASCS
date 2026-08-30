@@ -24,3 +24,7 @@ opt-in step.
 - Live smoke (opt-in, requires running Ollama + `qwen3:14b`):
   - bash: `RISALIVE=1 pytest -q tests/test_ollama_live.py`
   - PowerShell: `$env:RISALIVE="1"; pytest -q tests/test_ollama_live.py`
+
+For the full from-scratch Windows setup, connection, and verification of the
+local `qwen3:14b` model with OpenCode and the ASCS CLI, see
+`docs/OLLAMA_SETUP.md`. Run on a ≥16/32 GB machine, not a low-RAM dev laptop.
