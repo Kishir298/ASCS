@@ -514,9 +514,18 @@ def _execute_process(
     (common on Windows). No personal/user paths are hard-coded.
     """
     env = os.environ.copy()
-    bin_dir = str(Path(sys.executable).resolve().parent)
+    # Use the *unresolved* interpreter directory. ``sys.executable`` inside a
+    # virtualenv is a symlink (e.g. .venv/bin/python -> system python); resolving
+    # it would point at the framework interpreter's dir, which lacks the venv's
+    # ``python``/``pip``/``pytest`` shims and so breaks ``python`` resolution.
+    # Prepend both the venv dir (provides the shims) and the resolved dir.
+    bin_dir = str(Path(sys.executable).parent)
+    resolved_bin = str(Path(sys.executable).resolve().parent)
     existing = env.get("PATH", "")
-    env["PATH"] = bin_dir + os.pathsep + existing
+    extra = os.pathsep.join(
+        d for d in (bin_dir, resolved_bin) if d not in ("",) and d not in existing.split(os.pathsep)
+    )
+    env["PATH"] = (extra + os.pathsep if extra else "") + existing
     kwargs: dict[str, Any] = {
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,

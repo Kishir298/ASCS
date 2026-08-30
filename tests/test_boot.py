@@ -32,7 +32,7 @@ class FakeOllamaClient:
 def _patch(monkeypatch):
     monkeypatch.setattr(
         "agent.boot.OllamaClient",
-        lambda base_url, model, request_timeout, keep_alive: FakeOllamaClient(
+        lambda base_url, model, request_timeout, keep_alive, **kwargs: FakeOllamaClient(
             {
                 "reachable": True,
                 "version": "0.5.0",
@@ -78,7 +78,7 @@ def test_boot_prewarm_calls_ensure_ready_twice(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "agent.boot.OllamaClient",
-        lambda base_url, model, request_timeout, keep_alive: Counting(
+        lambda base_url, model, request_timeout, keep_alive, **kwargs: Counting(
             {"reachable": True, "version": "0.5.0", "model": "m", "available": True,
              "installed": ["m"], "warmed": False}
         ),
@@ -92,7 +92,7 @@ def test_boot_prewarm_calls_ensure_ready_twice(monkeypatch, tmp_path):
 def test_boot_ollama_unreachable(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "agent.boot.OllamaClient",
-        lambda base_url, model, request_timeout, keep_alive: FakeOllamaClient(
+        lambda base_url, model, request_timeout, keep_alive, **kwargs: FakeOllamaClient(
             {"available": True}, error=OllamaError("down")
         ),
     )
@@ -105,7 +105,7 @@ def test_boot_ollama_unreachable(monkeypatch, tmp_path):
 def test_boot_model_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "agent.boot.OllamaClient",
-        lambda base_url, model, request_timeout, keep_alive: FakeOllamaClient(
+        lambda base_url, model, request_timeout, keep_alive, **kwargs: FakeOllamaClient(
             {"reachable": True, "version": "0.5.0", "model": model,
              "available": False, "installed": ["other-model"], "warmed": False}
         ),

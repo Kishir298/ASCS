@@ -120,6 +120,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ollama keep_alive for the model between steps, e.g. '30m'.",
     )
     parser.add_argument(
+        "--num-ctx",
+        type=int,
+        default=None,
+        help="Qwen3 context window size in tokens (default: 32768).",
+    )
+    parser.add_argument(
+        "--num-predict",
+        type=int,
+        default=None,
+        help="Max tokens generated per request (default: 8192).",
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=None,
+        help="Retries after the initial Ollama attempt for transient "
+        "failures (default: 2, i.e. 3 total attempts).",
+    )
+    parser.add_argument(
+        "--backoff-s",
+        type=float,
+        default=None,
+        help="Base backoff seconds between Ollama request retries (default: 2.0).",
+    )
+    parser.add_argument(
         "--ui",
         action="store_true",
         help="Start the local web UI instead of a one-shot session.",
@@ -171,6 +196,10 @@ def build_config(args: argparse.Namespace) -> "AgentConfig":
         ("command_timeout", args.command_timeout),
         ("request_timeout", args.request_timeout),
         ("keep_alive", args.keep_alive),
+        ("num_ctx", args.num_ctx),
+        ("num_predict", args.num_predict),
+        ("max_retries", args.max_retries),
+        ("backoff_s", args.backoff_s),
         ("ui_host", args.host),
         ("ui_port", args.port),
     ):
@@ -201,6 +230,8 @@ def main(argv: list[str] | None = None) -> int:
         model=config.model,
         request_timeout=config.request_timeout,
         keep_alive=config.keep_alive,
+        num_ctx=config.num_ctx,
+        num_predict=config.num_predict,
     )
 
     # -- standalone preflight commands -------------------------------------
@@ -324,8 +355,12 @@ def _cmd_ui(config, client) -> int:
 def _cmd_list_models(client: OllamaClient) -> int:
     try:
         models = client.list_models(timeout=10)
+    except OllamaError as exc:
+        _print_error(f"Could not connect to Ollama at {client.base_url}.\n  {exc}")
+        _print_error("Make sure Ollama is running.")
+        return 1
     except Exception as exc:
-        _print_error(f"Could not reach Ollama: {exc}")
+        _print_error(f"Could not reach Ollama at {client.base_url}: {exc}")
         return 1
     print("Installed models:")
     for name in models:
@@ -336,9 +371,17 @@ def _cmd_list_models(client: OllamaClient) -> int:
 def _cmd_check(client: OllamaClient) -> int:
     try:
         client.check_connectivity(timeout=5)
+    except OllamaError as exc:
+        _print_error(f"Could not connect to Ollama at {client.base_url}.\n  {exc}")
+        _print_error("Make sure Ollama is running.")
+        return 1
+    except Exception as exc:
+        _print_error(f"Could not reach Ollama at {client.base_url}: {exc}")
+        return 1
+    try:
         models = client.list_models(timeout=10)
     except Exception as exc:
-        _print_error(f"Ollama check failed: {exc}")
+        _print_error(f"Could not list models at {client.base_url}: {exc}")
         return 1
     print("Ollama: OK")
     print(f"Model {client.model!r}: "

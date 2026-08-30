@@ -33,6 +33,14 @@ DEFAULT_MAX_ITERATIONS = 50
 DEFAULT_UI_HOST = "127.0.0.1"
 DEFAULT_UI_PORT = 8787
 
+# Qwen3 generation knobs (sent to the native Ollama endpoint as options).
+DEFAULT_NUM_CTX = 32768  # context window size
+DEFAULT_NUM_PREDICT = 8192  # max tokens generated per request
+
+# Ollama client retry / backoff policy for transient failures.
+DEFAULT_MAX_RETRIES = 2  # retries after the initial attempt (=3 total attempts)
+DEFAULT_BACKOFF_S = 2.0
+
 # The three user-facing modes.
 MODES = ("PLAN", "BUILD", "AUTO")
 
@@ -80,6 +88,10 @@ class AgentConfig:
     request_timeout: int = 600  # seconds; single model request budget
     keep_alive: str | None = None  # Ollama keep_alive e.g. "30m"
     prewarm: bool = True  # warm the model before the first real step
+    num_ctx: int = DEFAULT_NUM_CTX  # Qwen3 context window size
+    num_predict: int = DEFAULT_NUM_PREDICT  # max tokens generated per request
+    max_retries: int = DEFAULT_MAX_RETRIES  # retries past the initial attempt
+    backoff_s: float = DEFAULT_BACKOFF_S  # base backoff seconds between retries
     max_output_chars: int = 20_000  # per-tool-output truncation limit
     context_budget_chars: int = 70_000  # rolling history budget
     max_verify_retries: int = 2  # verification failure retries per task
@@ -171,6 +183,19 @@ def _env_bool(name: str, default: bool) -> bool:
     raise ValueError(f"Environment variable {name} must be a boolean, got {raw!r}")
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"Environment variable {name} must be a number, got {raw!r}") from exc
+    if value < 0:
+        raise ValueError(f"Environment variable {name} must be non-negative, got {value}")
+    return value
+
+
 def load_config(**overrides) -> AgentConfig:
     """Build an AgentConfig from environment variables and explicit overrides.
 
@@ -197,6 +222,10 @@ def load_config(**overrides) -> AgentConfig:
         "request_timeout": _env_int("AGENT_REQUEST_TIMEOUT", 600),
         "keep_alive": _env_str("AGENT_KEEP_ALIVE", "") or None,
         "prewarm": _env_bool("AGENT_PREWARM", True),
+        "num_ctx": _env_int("AGENT_NUM_CTX", DEFAULT_NUM_CTX),
+        "num_predict": _env_int("AGENT_NUM_PREDICT", DEFAULT_NUM_PREDICT),
+        "max_retries": _env_int("AGENT_MAX_RETRIES", DEFAULT_MAX_RETRIES),
+        "backoff_s": _env_float("AGENT_BACKOFF_S", DEFAULT_BACKOFF_S),
         "max_output_chars": _env_int("AGENT_MAX_OUTPUT_CHARS", 20_000),
         "context_budget_chars": _env_int("AGENT_CONTEXT_BUDGET_CHARS", 70_000),
         "malformed_retry_limit": _env_int("AGENT_MALFORMED_RETRY_LIMIT", 5),
@@ -233,6 +262,14 @@ def _validate(config: AgentConfig) -> None:
         raise ValueError("request_timeout must be positive")
     if config.max_output_chars <= 0:
         raise ValueError("max_output_chars must be positive")
+    if config.num_ctx <= 0:
+        raise ValueError("num_ctx must be positive")
+    if config.num_predict <= 0:
+        raise ValueError("num_predict must be positive")
+    if config.max_retries < 0:
+        raise ValueError("max_retries must be non-negative")
+    if config.backoff_s < 0:
+        raise ValueError("backoff_s must be non-negative")
     from .tools import TOOL_SPECS
 
     unknown = set(config.tools) - set(TOOL_SPECS)

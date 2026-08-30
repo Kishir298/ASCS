@@ -13,6 +13,7 @@ Implementation notes:
 
 from __future__ import annotations
 
+import inspect
 import json
 import re as _re
 import threading
@@ -52,6 +53,30 @@ class OllamaResponseError(OllamaError):
 
 
 _THINK_TAG_RE = _re.compile(r"<think>.*?</think>", _re.DOTALL)
+
+
+def _accepts_kwarg(func: Any, name: str) -> bool:
+    """Return True when ``func`` accepts the named keyword argument.
+
+    Used so that optional arguments (notably ``keep_alive``) are only
+    forwarded to a ``chat`` implementation that actually supports them.
+    Plain test doubles and older subclasses that implement a simpler
+    ``chat()`` signature will therefore keep working.
+    """
+    try:
+        sig = inspect.signature(func)
+    except (TypeError, ValueError):
+        return False
+
+    for param in sig.parameters.values():
+        if param.kind in (
+            inspect.Parameter.VAR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            if param.name == name:
+                return True
+    return False
 
 
 def _strip_think_tags(content: str) -> str:
@@ -117,14 +142,35 @@ class OllamaClient:
         model: str = "qwen3:14b",
         request_timeout: int = 600,
         keep_alive: str | None = None,
+        num_ctx: int | None = None,
+        num_predict: int | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.request_timeout = request_timeout
         self.keep_alive = keep_alive
+        self.num_ctx = num_ctx
+        self.num_predict = num_predict
 
         self._resp_lock = threading.Lock()
         self._active = None
+
+    def _options(self, options: dict[str, Any] | None) -> dict[str, Any]:
+        """Merge instance-level generation defaults with per-call options.
+
+        ``num_ctx`` / ``num_predict`` are Ollama-native ``options`` keys used
+        by the ``/api/chat`` endpoint only. They are intentionally kept inside
+        this provider layer and never sent to any OpenAI-compatible endpoint.
+        """
+        merged: dict[str, Any] = dict(options or {})
+
+        if self.num_ctx is not None:
+            merged.setdefault("num_ctx", self.num_ctx)
+
+        if self.num_predict is not None:
+            merged.setdefault("num_predict", self.num_predict)
+
+        return merged
 
     # ------------------------------------------------------------------
     # Cancellation
@@ -517,8 +563,9 @@ class OllamaClient:
         if format:
             payload["format"] = format
 
-        if options:
-            payload["options"] = options
+        merged_options = self._options(options)
+        if merged_options:
+            payload["options"] = merged_options
 
         if keep_alive is None:
             keep_alive = self.keep_alive
@@ -578,12 +625,19 @@ class OllamaClient:
 
         while True:
             try:
+                chat_kwargs: dict[str, Any] = {}
+                for _name, _value in (
+                    ("format", format),
+                    ("options", options),
+                    ("timeout", timeout),
+                    ("keep_alive", keep_alive),
+                ):
+                    if _accepts_kwarg(self.chat, _name):
+                        chat_kwargs[_name] = _value
+
                 return self.chat(
                     messages,
-                    format=format,
-                    options=options,
-                    timeout=timeout,
-                    keep_alive=keep_alive,
+                    **chat_kwargs,
                 )
 
             except (
@@ -631,8 +685,9 @@ class OllamaClient:
         if format:
             payload["format"] = format
 
-        if options:
-            payload["options"] = options
+        merged_options = self._options(options)
+        if merged_options:
+            payload["options"] = merged_options
 
         if keep_alive is None:
             keep_alive = self.keep_alive

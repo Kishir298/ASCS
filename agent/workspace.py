@@ -68,6 +68,29 @@ def _remove_link(path: Path) -> None:
             pass
 
 
+def _shares_real_ancestor(root: Path, raw: str) -> bool:
+    """True when ``raw`` shares a real ancestor with ``root`` beyond the
+    filesystem root.
+
+    Used to decide whether a bare leading-slash path is a genuine absolute
+    path living in the workspace's own tree (which must be honoured as
+    absolute and containment-checked) rather than a synthetic root-relative
+    hint like ``/whatever/../x``.
+    """
+    try:
+        common = os.path.commonpath(
+            [
+                os.path.normcase(os.path.realpath(str(root))),
+                os.path.normcase(
+                    os.path.realpath(os.path.normpath(raw))
+                ),
+            ]
+        )
+    except ValueError:
+        return False
+    return common != os.path.sep
+
+
 class Workspace:
     def __init__(self, root: str | os.PathLike[str]) -> None:
         try:
@@ -117,7 +140,17 @@ class Workspace:
             # is interpreted as relative to the WORKSPACE root (POSIX-style).
             # On Windows, Path("/x") is non-absolute but joining it to the
             # root would drop the root, so strip the leading separator first.
-            candidate = self._root / raw.lstrip("/\\")
+            #
+            # On POSIX a leading-slash path IS a real absolute path (e.g.
+            # "/var" resolves to "/private/var"). Treat it as a root-relative
+            # hint only when it is clearly synthetic — when it shares no
+            # ancestor with the workspace beyond the filesystem root. A path
+            # that lives in the same tree as the workspace is honoured as
+            # absolute so a genuine escape (sibling/outside path) is caught.
+            if os.name != "nt" and _shares_real_ancestor(self._root, raw):
+                pass  # keep absolute; the containment check below applies
+            else:
+                candidate = self._root / raw.lstrip("/\\")
         elif not candidate.is_absolute():
             candidate = self._root / candidate
         candidate = Path(os.path.normpath(candidate))

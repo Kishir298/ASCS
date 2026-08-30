@@ -140,6 +140,8 @@ def boot(
         model=cfg.model,
         request_timeout=cfg.request_timeout,
         keep_alive=cfg.keep_alive,
+        num_ctx=cfg.num_ctx,
+        num_predict=cfg.num_predict,
     )
     out.client = client
     try:

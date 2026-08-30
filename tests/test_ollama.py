@@ -429,3 +429,122 @@ def test_strip_think_tags_streaming_two_round_trips():
     assert vis == "final"
     assert buf == ""
 
+
+
+# ── num_ctx / num_predict: native /api/chat options ─────────────────────────
+
+def test_chat_sends_num_ctx_and_num_predict(server):
+    server.set(
+        body=json.dumps({"message": {"content": "ok"}, "done": True}).encode()
+    )
+    client = OllamaClient(base_url=server.base, num_ctx=32768, num_predict=8192)
+    client.chat([{"role": "user", "content": "hi"}])
+    payload = json.loads(server.handler.captured_body.decode())
+    assert payload["options"]["num_ctx"] == 32768
+    assert payload["options"]["num_predict"] == 8192
+
+
+def test_chat_options_override_num_ctx(server):
+    server.set(
+        body=json.dumps({"message": {"content": "ok"}, "done": True}).encode()
+    )
+    client = OllamaClient(base_url=server.base, num_ctx=32768)
+    client.chat([{"role": "user", "content": "hi"}], options={"num_ctx": 16384})
+    payload = json.loads(server.handler.captured_body.decode())
+    assert payload["options"]["num_ctx"] == 16384
+
+
+def test_chat_no_options_when_neither_set(server):
+    server.set(
+        body=json.dumps({"message": {"content": "ok"}, "done": True}).encode()
+    )
+    client = OllamaClient(base_url=server.base)
+    client.chat([{"role": "user", "content": "hi"}])
+    payload = json.loads(server.handler.captured_body.decode())
+    assert "options" not in payload
+
+
+def test_chat_stream_sends_num_ctx(server):
+    lines = [
+        {"message": {"content": "hi"}},
+        {"done": True},
+    ]
+    server.set(body=("\n".join(json.dumps(l) for l in lines) + "\n").encode())
+    client = OllamaClient(base_url=server.base, num_ctx=32768)
+    out = "".join(client.chat_stream([{"role": "user", "content": "hi"}]))
+    assert out == "hi"
+    payload = json.loads(server.handler.captured_body.decode())
+    assert payload["options"]["num_ctx"] == 32768
+    assert payload["stream"] is True
+
+
+# ── chat_resilient + keep_alive compatibility ───────────────────────────────
+
+def test_chat_resilient_forwards_keep_alive_to_real_client(server):
+    """chat_resilient must pass keep_alive through to a chat() that accepts it."""
+    server.set(
+        body=json.dumps({"message": {"content": "ok"}, "done": True}).encode()
+    )
+    client = OllamaClient(base_url=server.base, keep_alive="30m")
+    out = client.chat_resilient(
+        [{"role": "user", "content": "hi"}],
+        max_retries=2,
+        backoff_s=0,
+    )
+    assert out == "ok"
+    payload = json.loads(server.handler.captured_body.decode())
+    assert payload["keep_alive"] == "30m"
+
+
+class _PlainChat(OllamaClient):
+    """A compatible OllamaClient subclass whose chat() lacks keep_alive."""
+
+    def __init__(self, value="ok"):
+        super().__init__(base_url="http://127.0.0.1:1")
+        self.value = value
+        self.calls = 0
+
+    def chat(self, messages, *, format="json", options=None, timeout=None):
+        self.calls += 1
+        return self.value
+
+
+def test_chat_resilient_plain_chat_does_not_require_keep_alive():
+    """chat_resilient against a plain chat() that has no keep_alive param.
+
+    This is the regression that previously raised
+    TypeError: chat() got an unexpected keyword argument 'keep_alive'.
+    """
+    client = _PlainChat()
+    out = client.chat_resilient(
+        [{"role": "user", "content": "hi"}],
+        max_retries=2,
+        backoff_s=0,
+        keep_alive="30m",
+    )
+    assert out == "ok"
+    assert client.calls == 1
+
+
+# ── streaming edge cases ─────────────────────────────────────────────────────
+
+def test_chat_stream_skips_malformed_lines(server):
+    raw = (
+        "this is not json\n"
+        + json.dumps({"message": {"content": "hel"}}) + "\n"
+        + "garbage {\n"
+        + json.dumps({"message": {"content": "lo"}}) + "\n"
+        + json.dumps({"done": True}) + "\n"
+    )
+    server.set(body=raw.encode())
+    client = OllamaClient(base_url=server.base)
+    out = "".join(client.chat_stream([{"role": "user", "content": "hi"}]))
+    assert out == "hello"
+
+
+def test_chat_stream_empty_yields_nothing(server):
+    server.set(body=b"")
+    client = OllamaClient(base_url=server.base)
+    assert list(client.chat_stream([{"role": "user", "content": "hi"}])) == []
+
+
