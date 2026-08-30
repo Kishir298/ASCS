@@ -91,6 +91,37 @@ def test_reset_returns_idle():
     assert t.state == IDLE
 
 
+def test_start_begins_fresh_run_after_terminal(tmp_path):
+    # A second task in a long-lived process must not inherit the previous
+    # run's timing or transition history (web UI successive runs).
+    import time as _time
+
+    t = StateTracker(IDLE)
+    t.configure(mode="AUTO", task="first")
+    t.start(RECEIVING_TASK)
+    t.set(EXECUTING)
+    t.finish(COMPLETE, "first done")
+    first_started = t.snapshot.started_at
+    assert len(t.snapshot.transitions) >= 2
+
+    _time.sleep(0.05)  # let the clock tick past the first run's timestamp
+    t.configure(mode="AUTO", task="second")
+    t.start(RECEIVING_TASK)
+    snap = t.snapshot
+    assert snap.started_at is not None
+    assert snap.started_at > first_started
+    assert snap.ended_at is None
+    # Old run's transitions are gone; only the fresh RECEIVING entry remains.
+    assert snap.transitions == [(RECEIVING_TASK, snap.started_at)]
+    assert snap.state == RECEIVING_TASK
+
+
+def test_start_from_idle_counts_entry_transition():
+    t = StateTracker(IDLE)
+    t.start(RECEIVING_TASK)
+    assert t.snapshot.transitions == [(RECEIVING_TASK, t.snapshot.started_at)]
+
+
 def test_labels_are_upper_ascii():
     for state, label in STATE_LABELS.items():
         assert is_valid_state(state)

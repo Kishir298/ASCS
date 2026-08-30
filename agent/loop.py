@@ -42,17 +42,19 @@ from .events import (
     EventSink,
     emit_activity,
     emit_command_completed,
+    emit_command_output,
     emit_command_started,
     emit_completed,
     emit_error,
     emit_file_event,
     emit_mode_changed,
+    emit_model_completed,
+    emit_model_started,
     emit_started,
     emit_status,
     emit_stopped,
     emit_test_completed,
     emit_test_started,
-    emit_thinking,
     emit_tool_completed,
     emit_tool_started,
     null_sink,
@@ -206,13 +208,14 @@ class AgentLoop:
             if is_test_command(command):
                 emit_test_started(self.event_sink, command)
         else:
-            ok = (exit_code or 0) == 0
+            rc = exit_code if exit_code is not None else 0
+            ok = rc == 0
             emit_command_completed(
-                self.event_sink, command, exit_code=exit_code or 0, ok=ok, elapsed=elapsed
+                self.event_sink, command, exit_code=rc, ok=ok, elapsed=elapsed
             )
             if is_test_command(command):
                 emit_test_completed(
-                    self.event_sink, command, exit_code=exit_code or 0, ok=ok, elapsed=elapsed
+                    self.event_sink, command, exit_code=rc, ok=ok, elapsed=elapsed
                 )
 
     # -- main entry ---------------------------------------------------------
@@ -253,15 +256,13 @@ class AgentLoop:
 
                 thinking_start = _time.monotonic()
                 try:
-                    emit_thinking(
-                        self.event_sink,
-                        "Model is thinking/generating...",
-                        elapsed=None,
+                    emit_model_started(
+                        self.event_sink, "Model is thinking/generating..."
                     )
                     reply_text = self.client.chat(
                         self._messages_for_request(), format="json"
                     )
-                    emit_thinking(
+                    emit_model_completed(
                         self.event_sink,
                         "Model responded",
                         elapsed=_time.monotonic() - thinking_start,
@@ -450,10 +451,18 @@ class AgentLoop:
         elapsed = _time.monotonic() - started
 
         if is_command:
-            self._emit_command(
-                "end",
-                arguments.get("command", ""),
-                exit_code=self._rc_from_note(result.note),
+            cmd = arguments.get("command", "")
+            exit_code = self._rc_from_note(result.note)
+            self._emit_command("end", cmd, exit_code=exit_code, elapsed=elapsed)
+            preview = result.output
+            if len(preview) > 6000:
+                preview = preview[:5997] + "..."
+            emit_command_output(
+                self.event_sink,
+                cmd,
+                preview,
+                exit_code=exit_code,
+                ok=(exit_code or 0) == 0,
             )
 
         if tool == "set_plan" and result.ok:
@@ -487,6 +496,8 @@ class AgentLoop:
 
     @staticmethod
     def _rc_from_note(note: str) -> int:
+        if note and "timed out" in note:
+            return -1  # non-zero sentinel: a timeout is never success
         m = re.search(r"exit code (\d+)", note or "")
         return int(m.group(1)) if m else 0
 

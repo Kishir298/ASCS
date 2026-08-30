@@ -172,6 +172,21 @@ def test_run_command_failure_nonzero(tmp_path, config):
     assert r.ok or r.error  # nonzero exit is reported, not thrown
 
 
+def test_run_command_timeout_is_a_failure(tmp_path, config):
+    r = execute_tool(
+        "run_command",
+        {
+            "command": f'{sys.executable} -c "import time; time.sleep(30)"',
+            "timeout": 1,
+        },
+        Workspace(tmp_path),
+        config,
+    )
+    assert not r.ok  # a timeout never counts as success
+    assert "TIMED OUT" in r.output
+    assert "timed out" in (r.note or "")
+
+
 def test_workspace_escape_via_tool_blocked(tmp_path, config):
     # write_file with ../ traversal must be blocked and must not create anything
     outside = tmp_path.parent / "escape_should_not_exist.txt"

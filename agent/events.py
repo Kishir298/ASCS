@@ -22,12 +22,15 @@ from typing import Any, Callable
 EVENT_TYPES = (
     "agent_started",
     "agent_thinking",
+    "model_started",
+    "model_completed",
     "tool_started",
     "tool_completed",
     "file_read",
     "file_written",
     "patch_applied",
     "command_started",
+    "command_output",
     "command_completed",
     "test_started",
     "test_completed",
@@ -49,6 +52,7 @@ class AgentEvent:
     tool: str | None = None
     target: str | None = None
     command: str | None = None
+    output: str | None = None
     exit_code: int | None = None
     ok: bool | None = None
     mode: str | None = None
@@ -110,6 +114,53 @@ def emit_thinking(
             type="agent_thinking",
             message=message or "Model is thinking...",
             elapsed=elapsed,
+        ),
+    )
+
+
+def emit_model_started(sink: EventSink | None, message: str = "") -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="model_started",
+            message=message or "Model is thinking...",
+        ),
+    )
+
+
+def emit_model_completed(
+    sink: EventSink | None,
+    message: str = "",
+    *,
+    elapsed: float | None = None,
+) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="model_completed",
+            message=message or "Model responded",
+            elapsed=elapsed,
+        ),
+    )
+
+
+def emit_command_output(
+    sink: EventSink | None,
+    command: str,
+    output: str,
+    *,
+    exit_code: int | None = None,
+    ok: bool = True,
+) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="command_output",
+            command=command,
+            output=output,
+            exit_code=exit_code,
+            ok=ok,
+            message=f"Command output for: {command}",
         ),
     )
 

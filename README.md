@@ -76,12 +76,30 @@ want other machines on your LAN to reach it.
 
 - Chat area with live state pill and per-step output
 - Mode selector (PLAN / BUILD / AUTO) per task
+- Multi-line input: Enter sends, Shift+Enter inserts a new line
+- Live command output: every `run_command` streams its result (stdout,
+  stderr, exit code) into the feed so you see exactly what the agent saw
 - **STOP** cancels the active run immediately (interrupts the model call,
   kills child processes, reports `cancelled`)
 - History, status (Ollama reachable? model installed?), clear
 
 Server-Sent Events at `/api/events`, plus `/api/task`, `/api/stop`,
 `/api/state`, `/api/status`, `/api/history`, `/api/clear`.
+
+## Events
+
+The loop emits structured, JSON-serializable events over SSE for the UI and
+for future ASIS/TIVISS integrations:
+
+`agent_started`, `status`, `mode_changed`, `model_started`, `model_completed`,
+`activity`, `tool_started`, `tool_completed`, `file_read`, `file_written`,
+`patch_applied`, `command_started`, `command_output`, `command_completed`,
+`test_started`, `test_completed`, `agent_error`, `agent_stopped`,
+`agent_completed`.
+
+`command_output` carries the truncated stdout/stderr text of a
+`run_command`; a timed-out command is reported with exit code `-1` and never
+counts as success in the UI, the events, or the model's view of the result.
 
 ## Tools
 
@@ -106,10 +124,17 @@ Environment variables (CLI flags win, both override defaults):
 | `AGENT_MODE`             | `PLAN` / `BUILD` / `AUTO` / `SAFE`   | `AUTO`                |
 | `AGENT_APPROVAL`         | in SAFE mode, auto-approve all       | off (ask each time)   |
 | `AGENT_UI_HOST` / `AGENT_UI_PORT` | web UI bind address / port | `127.0.0.1` / `8787` |
-| `AGENT_MODEL`            | Ollama model                         | `qwen2.5-coder:14b`   |
+| `OLLAMA_BASE_URL`        | Ollama server URL                    | `http://localhost:11434` |
+| `OLLAMA_MODEL`           | Ollama model                         | `qwen2.5-coder:14b`   |
+| `AGENT_MAX_ITERATIONS`   | agent iteration budget (→ `TIMEOUT`) | `50`                  |
 | `AGENT_REQUEST_TIMEOUT`  | per-model-call timeout (s)           | `600`                 |
+| `AGENT_COMMAND_TIMEOUT`  | default `run_command` timeout (s)    | `120`                 |
 | `AGENT_KEEP_ALIVE`       | Ollama keep-alive (e.g. `30m`)       | default (Ollama-side) |
 | `AGENT_PREWARM`          | warm the model at startup            | on                    |
+| `AGENT_VERBOSE`          | show tool output in CLI logs         | off                   |
+| `AGENT_MAX_OUTPUT_CHARS` | per-tool-output truncation limit     | `20000`               |
+| `AGENT_CONTEXT_BUDGET_CHARS` | rolling conversation budget      | `70000`               |
+| `AGENT_MALFORMED_RETRY_LIMIT` | bad-reply retries before `FAILED` | `5`               |
 
 ## Development
 

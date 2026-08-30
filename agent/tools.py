@@ -471,9 +471,12 @@ def _run_command(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
         f"--- stdout ---\n{stdout}\n"
         f"--- stderr ---\n{stderr}"
     )
+    # A timeout never counts as success: the model should treat it as a
+    # failure to inspect and adapt to, not a completed step.
     return ToolResult(
         "run_command",
         truncate_env(output, cfg.max_output_chars),
+        ok=not timed_out,
         note=("timed out after {timeout}s" if timed_out else f"exit code {rc}"),
     )
 

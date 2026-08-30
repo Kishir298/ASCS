@@ -6,6 +6,7 @@ A real Ollama server is intentionally NOT required.
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -326,7 +327,8 @@ def test_events_emitted_end_to_end(tmp_path):
     types = [e.type for e in events]
     assert "agent_started" in types
     assert "status" in types
-    assert "agent_thinking" in types
+    assert "model_started" in types
+    assert "model_completed" in types
     assert "tool_started" in types
     assert "tool_completed" in types
     assert "agent_completed" in types
@@ -350,6 +352,45 @@ def test_test_command_emits_test_events(tmp_path):
     assert "command_completed" in types
     assert "test_started" in types
     assert "test_completed" in types
+
+
+def test_command_output_event_carries_output(tmp_path):
+    events = []
+    sink = events.append
+    loop, _ = make_loop(
+        tmp_path,
+        [
+            tool_call("run_command", {"command": "python -c \"print('visible-ui-output')\""}),
+            json.dumps({"done": True, "summary": "ok"}),
+        ],
+    )
+    loop.event_sink = sink
+    loop.run("task")
+    outputs = [e for e in events if e.type == "command_output"]
+    assert outputs, "command_output event was not emitted"
+    assert any("visible-ui-output" in (o.output or "") for o in outputs)
+    assert all(o.command for o in outputs)
+    assert all(o.exit_code is not None for o in outputs)
+
+
+def test_timed_out_command_is_reported_as_failure(tmp_path):
+    # A timed-out run_command must reach the model as a failure, not a success.
+    loop, _ = make_loop(
+        tmp_path,
+        [
+            tool_call(
+                "run_command",
+                {"command": f'{sys.executable} -c "import time; time.sleep(30)"', "timeout": 1},
+            ),
+            json.dumps({"done": True, "summary": "ok"}),
+        ],
+    )
+    result = loop.run("task")
+    assert result.status == "completed"
+    # The command result became a FAILED tool result in the conversation.
+    contents = " ".join(str(m.get("content", "")) for m in loop._messages)
+    assert "TIMED OUT" in contents
+    assert "FAILED" in contents or "failed" in contents.lower()
 
 
 def test_file_event_emitted_for_write(tmp_path):

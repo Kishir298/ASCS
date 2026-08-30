@@ -34,6 +34,12 @@ def _print_error(msg: str) -> None:
     print(f"ERROR: {msg}", file=sys.stderr, flush=True)
 
 
+def _boot_progress(phase: str, message: str, elapsed: float) -> None:
+    """Live-print each finished startup stage with its real timing."""
+    stamp = f"[{elapsed:6.2f}s]" if elapsed > 0 else "[     ]"
+    print(f"{stamp} {message}", flush=True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="risa",
@@ -197,9 +203,11 @@ def main(argv: list[str] | None = None) -> int:
     # -- preflight connectivity --------------------------------------------
     from .boot import boot
 
+    _print_step("A.S.C.S. starting...")
     report = boot(
         workspace_path=str(config.workspace),
         prewarm=False,
+        progress=_boot_progress,
         **{
             f: getattr(config, f)
             for f in config.__dataclass_fields__
@@ -209,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     if not report.ok:
         _print_error(report.error)
         return 1
+    _print_step("A.S.C.S. ready.")
 
     _print_step(f"risa v{__version__} — Ollama model: {config.model}")
     _print_step(f"Workspace: {config.workspace}")
@@ -257,19 +266,24 @@ def main(argv: list[str] | None = None) -> int:
 
 def _cmd_ui(config, client) -> int:
     """Boot sequence then serve the local web UI."""
-    from .boot import boot, print_boot
+    from .boot import boot, boot_error_message
 
+    _print_step("A.S.C.S. starting...")
     report = boot(
         workspace_path=str(config.workspace),
         prewarm=config.prewarm,
+        progress=_boot_progress,
         **{
             f: getattr(config, f)
             for f in config.__dataclass_fields__
             if f not in ("workspace", "prewarm")
         },
     )
-    print_boot(report)
-    if not report.ok:
+    if report.ok:
+        _print_step("A.S.C.S. ready.")
+    else:
+        _print_step("A.S.C.S. startup FAILED.")
+        _print_error(boot_error_message(report))
         return 1
     try:
         workspace = Workspace(config.workspace)

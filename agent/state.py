@@ -140,12 +140,31 @@ class StateTracker:
             self._snapshot.mode = mode
             self._snapshot.task = task
 
-    def start(self, state: str = RECEIVING_TASK) -> None:
-        self.set(state)
+    def start(self, state: str = RECEIVING_TASK, message: str = "") -> None:
+        """Begin a new run: reset elapsed timing and transition history.
+
+        Each call to ``start`` marks a fresh run so a second task in a long-lived
+        process (e.g. the web UI) does not inherit the previous run's
+        ``started_at``/transitions. ``IDLE -> RECEIVING_TASK`` counts as the
+        first entry into the run.
+        """
+        if not is_valid_state(state):
+            raise ValueError(f"Unknown state {state!r}")
         with self._lock:
-            if self._snapshot.started_at is None:
-                self._snapshot.started_at = _time.time()
+            prev = self._snapshot.state
+            self._snapshot.transitions = []
+            self._snapshot.started_at = _time.time()
             self._snapshot.ended_at = None
+            self._snapshot.message = message
+            if prev != state:
+                self._snapshot.transitions.append((state, _time.time()))
+                self._snapshot.state = state
+        if prev != state:
+            for handler in list(self._handlers):
+                try:
+                    handler(state, prev)
+                except Exception:  # pragma: no cover - observers must not break core
+                    pass
 
     def finish(self, state: str, message: str = "") -> None:
         if not is_valid_state(state):

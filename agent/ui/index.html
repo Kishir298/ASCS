@@ -113,7 +113,7 @@
 
 <main id="main">
   <div class="feed" id="feed">
-    <div class="empty" id="emptyHint">A.S.C.S. ready. Type a task and press Send, or press the STOP button to cancel a run.</div>
+    <div class="empty" id="emptyHint">A.S.C.S. ready. Type a task (Enter to send, Shift+Enter for a new line) and press Send, or press the STOP button to cancel a run.</div>
   </div>
 </main>
 
@@ -125,7 +125,7 @@
   </div>
   <div class="inputrow">
     <label class="sr-only" for="taskInput">Task</label>
-    <textarea id="taskInput" placeholder="Describe a coding task… e.g. add a --dry-run flag to the CLI and test it"></textarea>
+    <textarea id="taskInput" placeholder="Describe a coding task… e.g. add a --dry-run flag to the CLI and test it (Shift+Enter for a new line)"></textarea>
     <button class="act" id="sendBtn">Send</button>
     <button class="act stop" id="stopBtn" disabled>STOP</button>
     <button class="ghost" id="clearBtn">Clear</button>
@@ -194,8 +194,12 @@ function handleEvent(e) {
       push("okx", `<h5>Agent started</h5><pre>${esc(e.message || "")}</pre>`);
       break;
     case "agent_thinking":
+    case "model_started":
       if ((e.message || "").toLowerCase().includes("respond")) break;
       push("think", `<span class="thinking"><span class="spinner"></span> model thinking…</span>`);
+      break;
+    case "model_completed":
+      // model responded; the subsequent tool/command rows show what it did
       break;
     case "tool_started":
       push("tool", `<h5>Tool started</h5><pre>${esc(e.tool || "")} ${esc(e.target || "")}</pre>`);
@@ -207,6 +211,12 @@ function handleEvent(e) {
     case "test_started":
       push("cmd", `<h5>${e.type.endsWith("started") ? "Running" : ""} command</h5><pre>${esc(e.command || "")}</pre>`);
       break;
+    case "command_output": {
+      const code = e.exit_code === -1 ? "TIMEOUT" : (e.exit_code ?? "?");
+      const tag = (e.ok === false || e.exit_code === -1) ? "no" : "ok";
+      push("cmd", `<h5>Command output</h5><span class="tag ${tag}">${esc(String(code))}</span><pre>${esc(e.output || "")}</pre>`);
+      break;
+    }
     case "command_completed":
     case "test_completed":
       push("cmd", `<h5>${e.type.replace("_completed", " result")} · exit ${e.exit_code ?? "?"}</h5><span class="tag ${e.ok ? "ok" : "no"}">${e.ok ? "PASS" : "FAIL"}</span> <span class="tag">${esc(e.elapsed != null ? e.elapsed.toFixed(2) + "s" : "")}</span>`);
@@ -325,7 +335,8 @@ $("clearBtn").addEventListener("click", () => {
   }).catch(() => {});
 });
 $("taskInput").addEventListener("keydown", (ev) => {
-  if (ev.key === "Enter") { ev.preventDefault(); send(); }
+  // Enter sends; Shift+Enter inserts a newline for multi-line tasks.
+  if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); send(); }
 });
 document.querySelectorAll("#modes button").forEach((b) =>
   b.addEventListener("click", () => selectMode(b.dataset.mode)));
