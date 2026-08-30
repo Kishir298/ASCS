@@ -67,6 +67,11 @@ class AgentEvent:
         return json.dumps(self.to_dict())
 
 
+def to_event_dict(event: AgentEvent) -> dict[str, Any]:
+    """Return the JSON-serializable payload of an event."""
+    return event.to_dict()
+
+
 # A synchronous event sink; receives AgentEvent objects.
 EventSink = Callable[[AgentEvent], None]
 
@@ -169,6 +174,28 @@ def emit_file_event(
             target=path,
             ok=ok,
             message=f"{event_type}: {path}",
+        ),
+    )
+
+
+def emit_mode_changed(sink: EventSink | None, mode: str | None, message: str = "") -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="mode_changed",
+            mode=mode,
+            message=message or f"Mode set to {mode}",
+        ),
+    )
+
+
+def emit_test_started(sink: EventSink | None, command: str) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="test_started",
+            command=command,
+            message=f"Running tests: {command}",
         ),
     )
 

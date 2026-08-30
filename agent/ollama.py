@@ -14,6 +14,7 @@ Implementation notes:
 from __future__ import annotations
 
 import json
+import threading
 import urllib.error
 import urllib.request
 from typing import Any, Iterator
@@ -68,12 +69,42 @@ class OllamaClient:
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "qwen2.5-coder:7b",
+        model: str = "qwen2.5-coder:14b",
         request_timeout: int = 600,
+        keep_alive: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.request_timeout = request_timeout
+        self.keep_alive = keep_alive
+        self._resp_lock = threading.Lock()
+        self._active = None  # active HTTPResponse, for out-of-band cancellation
+
+    # -- cancellation support ----------------------------------------------
+
+    def _track(self, resp, timeout: int) -> None:
+        with self._resp_lock:
+            self._active = resp
+
+    def _untrack(self, resp) -> None:
+        with self._resp_lock:
+            if self._active is resp:
+                self._active = None
+
+    def abort_current(self) -> None:
+        """Close any in-flight response so a blocked read is interrupted.
+
+        Used by the UI/TaskRunner to cancel a running Ollama generation: the
+        closing socket makes the worker thread's blocking read raise (OSError)
+        instead of waiting for the model to finish.
+        """
+        with self._resp_lock:
+            resp = self._active
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:  # pragma: no cover - defensive
+                pass
 
     # -- low level ---------------------------------------------------------
 
@@ -90,7 +121,11 @@ class OllamaClient:
         req.add_header("Connection", "close")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read()
+                self._track(resp, timeout)
+                try:
+                    return resp.read()
+                finally:
+                    self._untrack(resp)
         except urllib.error.HTTPError as exc:
             body = b""
             try:
@@ -116,7 +151,11 @@ class OllamaClient:
         req.add_header("Connection", "close")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read()
+                self._track(resp, timeout)
+                try:
+                    return resp.read()
+                finally:
+                    self._untrack(resp)
         except urllib.error.HTTPError as exc:
             raise OllamaHTTPError(exc.code, f"GET {endpoint} failed") from exc
         except urllib.error.URLError as exc:
@@ -183,6 +222,56 @@ class OllamaClient:
         target = model or self.model
         return target in self.list_models(timeout=timeout)
 
+    def warm(self, timeout: int = 120) -> None:
+        """Probe the model with a tiny request to trigger (cold) model load.
+
+        Local models such as ``qwen2.5-coder:14b`` can take tens of seconds to
+        load on first use. Warming up eagerly makes the first real step reach
+        the model instead of paying the load latency mid-task. A slow warm is
+        *not* an error; ``OllamaError`` subclasses still propagate.
+        """
+        try:
+            self.chat(
+                [{"role": "user", "content": "Reply with the single word: ok."}],
+                format=None,
+                timeout=timeout,
+            )
+        except (OllamaHTTPError, OllamaResponseError, OllamaTimeoutError):
+            # The server answered but choked on our tiny ping; that still means
+            # the model finished loading. Treat it as warm enough.
+            pass
+
+    def ensure_ready(self, *, check_timeout: int = 5, warm_timeout: int = 120, prewarm: bool = True) -> dict[str, Any]:
+        """Run connectivity + model availability checks, optionally prewarming.
+
+        Returns a small report dict:
+            {"reachable": bool, "version": str, "model": str,
+             "available": bool, "installed": list[str], "warmed": bool}
+
+        Raises ``OllamaConnectionError`` / ``OllamaHTTPError`` when the server
+        cannot be reached at all.
+        """
+        self.check_connectivity(timeout=check_timeout)
+        raw = self._get("/api/version", timeout=check_timeout)
+        try:
+            version = (json.loads(raw.decode("utf-8", errors="replace")) or {}).get("version", "")
+        except json.JSONDecodeError:
+            version = ""
+        installed = self.list_models(timeout=check_timeout)
+        available = self.model in installed
+        report: dict[str, Any] = {
+            "reachable": True,
+            "version": version,
+            "model": self.model,
+            "available": available,
+            "installed": installed,
+            "warmed": False,
+        }
+        if prewarm and available:
+            self.warm(timeout=warm_timeout)
+            report["warmed"] = True
+        return report
+
     def chat(
         self,
         messages: list[dict[str, str]],
@@ -190,8 +279,13 @@ class OllamaClient:
         format: str | None = "json",
         options: dict[str, Any] | None = None,
         timeout: int | None = None,
+        keep_alive: str | None = None,
     ) -> str:
-        """Send a chat request and return the assistant's text content."""
+        """Send a chat request and return the assistant's text content.
+
+        ``keep_alive`` keeps the loaded model resident between calls so
+        separate agent steps don't pay a cold-reload penalty (e.g. ``"30m"``).
+        """
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -201,6 +295,10 @@ class OllamaClient:
             payload["format"] = format
         if options:
             payload["options"] = options
+        if keep_alive is None:
+            keep_alive = self.keep_alive
+        if keep_alive:
+            payload["keep_alive"] = keep_alive
         raw = self._post("/api/chat", payload, timeout or self.request_timeout)
         parsed = self._parse_chat_body(raw)
         message = parsed.get("message") or {}
@@ -218,6 +316,7 @@ class OllamaClient:
         format: str | None = "json",
         options: dict[str, Any] | None = None,
         timeout: int | None = None,
+        keep_alive: str | None = None,
     ) -> Iterator[str]:
         """Yield assistant content deltas as they arrive.
 
@@ -233,6 +332,10 @@ class OllamaClient:
             payload["format"] = format
         if options:
             payload["options"] = options
+        if keep_alive is None:
+            keep_alive = self.keep_alive
+        if keep_alive:
+            payload["keep_alive"] = keep_alive
         url = f"{self.base_url}/api/chat"
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -242,17 +345,21 @@ class OllamaClient:
         req.add_header("Connection", "close")
         try:
             with urllib.request.urlopen(req, timeout=timeout or self.request_timeout) as resp:
-                for raw_line in resp:
-                    line = raw_line.decode("utf-8", errors="replace").strip()
-                    if not line:
-                        continue
-                    try:
-                        obj = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    delta = (obj.get("message") or {}).get("content") or ""
-                    if delta:
-                        yield delta
+                self._track(resp, timeout or self.request_timeout)
+                try:
+                    for raw_line in resp:
+                        line = raw_line.decode("utf-8", errors="replace").strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        delta = (obj.get("message") or {}).get("content") or ""
+                        if delta:
+                            yield delta
+                finally:
+                    self._untrack(resp)
         except urllib.error.HTTPError as exc:
             body = b""
             try:

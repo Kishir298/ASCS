@@ -90,9 +90,14 @@ def test_tools_tuple_preset(tmp_path):
         "search_files",
         "write_file",
         "apply_patch",
+        "delete_file",
+        "move_file",
+        "copy_file",
         "run_command",
+        "inspect_environment",
         "git_status",
         "git_diff",
+        "set_plan",
     )
 
 

@@ -10,13 +10,16 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import platform
 import re
+import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
 
-from .models import ToolResult, truncate
+from .models import Plan, ToolResult, truncate
 from .workspace import Workspace, WorkspaceError, should_ignore
 
 TRUNCATION_MARKER = "\n... [TRUNCATED by coding-agent; use targeted tools/arguments to see the rest]"
@@ -37,6 +40,8 @@ def _require(obj: dict[str, Any], key: str, expected: type) -> Any:
     if key not in obj or obj[key] is None:
         raise ToolValidationError(f"Missing required argument: {key!r}")
     value = obj[key]
+    if expected is Any:
+        return value  # presence-checked; no type constraint
     if not isinstance(value, expected):
         raise ToolValidationError(
             f"Argument {key!r} must be of type {expected.__name__}, got {type(value).__name__}."
@@ -73,6 +78,13 @@ def _opt_bool(obj: dict[str, Any], key: str, default: bool) -> bool:
     if isinstance(value, str) and value.lower() in ("true", "false"):
         return value.lower() == "true"
     raise ToolValidationError(f"Argument {key!r} must be a boolean.")
+
+
+def _opt_any(obj: dict[str, Any], key: str, default: Any = None) -> Any:
+    """Pass-through for heterogeneous arguments (lists/dicts/strings)."""
+    if key not in obj or obj[key] is None:
+        return default
+    return obj[key]
 
 
 # -- individual tools ------------------------------------------------------
@@ -307,6 +319,139 @@ def _apply_patch(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
     )
 
 
+def _delete_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
+    path = _require(args, "path", str)
+    target = ws.resolve(path)
+    if target == ws.root:
+        raise ToolValidationError("Refusing to delete the workspace root itself.")
+    if not target.exists() and not target.is_symlink():
+        raise ToolValidationError(f"Path does not exist: {path}")
+    if target.is_dir() and not target.is_symlink():
+        raise ToolValidationError(
+            f"Refusing to delete directory {path!r} with delete_file; "
+            "remove directories via run_command (e.g. Remove-Item -Recurse) "
+            "with explicit operator intent."
+        )
+    try:
+        rel = target.relative_to(ws.root)
+    except ValueError:
+        raise ToolValidationError(f"Path resolves outside the workspace: {path}")
+    if any(part in (".git", ".github") for part in rel.parts):
+        raise ToolValidationError(
+            f"Refusing to delete version-control metadata at {path!r}."
+        )
+    if rel.name in (".gitignore",):
+        raise ToolValidationError(
+            f"Refusing to delete {rel.name!r}; remove it via run_command if that "
+            "is genuinely required."
+        )
+    if target.is_symlink():
+        from .workspace import _remove_link
+        _remove_link(target)
+        return ToolResult(
+            "delete_file", f"Removed link {path}", note="link deleted"
+        )
+    target.unlink()
+    return ToolResult("delete_file", f"Deleted {path}", note="file deleted")
+
+
+def _move_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
+    path = _require(args, "path", str)
+    destination = _require(args, "destination", str)
+    src = ws.resolve(path)
+    dst = ws.resolve(destination)
+    if not src.exists() and not src.is_symlink():
+        raise ToolValidationError(f"Source does not exist: {path}")
+    if dst.exists():
+        if not dst.is_dir():
+            raise ToolValidationError(
+                f"Destination already exists and is not a directory: {destination}"
+            )
+        dst = dst / src.name
+        if dst.exists():
+            raise ToolValidationError(
+                f"Destination already exists: {dst.relative_to(ws.root)}"
+            )
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(src, dst)
+    rel = dst.relative_to(ws.root)
+    return ToolResult("move_file", f"Moved {path} to {rel}", note="file moved")
+
+
+def _copy_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
+    path = _require(args, "path", str)
+    destination = _require(args, "destination", str)
+    src = ws.resolve(path)
+    dst = ws.resolve(destination)
+    if not src.is_file():
+        raise ToolValidationError(f"Source is not a regular file: {path}")
+    if dst.exists() and not dst.is_dir():
+        raise ToolValidationError(
+            f"Destination already exists: {destination}"
+        )
+    if dst.is_dir():
+        dst = dst / src.name
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    import shutil
+    shutil.copyfile(src, dst)
+    rel = dst.relative_to(ws.root)
+    return ToolResult(
+        "copy_file",
+        f"Copied {path} to {rel} ({dst.stat().st_size} bytes)",
+        note="file copied",
+    )
+
+
+def _set_plan(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
+    value = _opt_any(args, "plan")
+    goal = _opt_str(args, "goal", "")
+    plan = Plan.from_value(value)
+    return ToolResult(
+        "set_plan",
+        plan.to_text(),
+        note="plan recorded",
+    )
+
+
+def _inspect_environment(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
+    """Report host/platform facts so the model never guesses workflows."""
+    def _which(name: str) -> str:
+        found = shutil.which(name)
+        return found or "(not on PATH)"
+
+    lines = [
+        f"os: {os.name} ({sys.platform})",
+        f"platform: {platform.system()} {platform.release()} "
+        f"({platform.machine()})",
+        f"shell for run_command: "
+        f"{os.environ.get('COMSPEC') or '/bin/sh'} (default on this OS)",
+        f"python (this agent): {sys.executable}",
+        f"python on PATH: {_which('python')}",
+        f"py launcher: {_which('py')}",
+        f"pip: {_which('pip')}",
+        f"pytest: {_which('pytest')}",
+        f"git: {_which('git')}",
+        f"workspace: {ws.root}",
+        f"pathsep: {os.pathsep}",
+        "hint: run_command already makes the running interpreter's directory "
+        "available on PATH, so `python`, `pip`, and `pytest` should resolve.",
+    ]
+    body = "\n".join(lines)
+    if os.name == "nt":
+        body += (
+            "\nWindows tips:\n"
+            "- Commands run through cmd.exe; `dir`, `type`, `copy`, `move`, "
+            "`del`, `findstr` work.\n"
+            "- Prefer `python -m pytest`, `python -m pip ...` so the right "
+            "interpreter is used.\n"
+            "- For PowerShell idioms, wrap them: "
+            '`powershell -NoProfile -Command "Get-ChildItem"`.\n'
+            "- venv activation on Windows: `env\\Scripts\\activate.bat`; you "
+            "can also call its python directly."
+        )
+    return ToolResult("inspect_environment", body)
+
+
 def _run_command(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
     command = _require(args, "command", str)
     if not command.strip():
@@ -357,7 +502,16 @@ def _terminate_tree(proc: subprocess.Popen) -> None:
 def _execute_process(
     command: str, cwd: Path, timeout: int
 ) -> tuple[subprocess.Popen, str, str, int | None, bool, bool]:
-    """Run a shell command capturing output, honoring timeout and Ctrl+C."""
+    """Run a shell command capturing output, honoring timeout and Ctrl+C.
+
+    The directory containing the running interpreter is prepended to PATH so
+    ``python``/``pip``/``pytest`` resolve even when the system PATH lacks them
+    (common on Windows). No personal/user paths are hard-coded.
+    """
+    env = os.environ.copy()
+    bin_dir = str(Path(sys.executable).resolve().parent)
+    existing = env.get("PATH", "")
+    env["PATH"] = bin_dir + os.pathsep + existing
     kwargs: dict[str, Any] = {
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
@@ -366,6 +520,7 @@ def _execute_process(
         "text": True,
         "encoding": "utf-8",
         "errors": "replace",
+        "env": env,
     }
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -538,6 +693,53 @@ register_tool(
 )
 register_tool(
     ToolSpec(
+        name="delete_file",
+        summary="Delete one regular file (or symlink) inside the workspace. Refuses directories, the workspace root, and VCS metadata.",
+        arguments_schema={
+            "path": {"type": "string", "description": "Path relative to workspace to delete.", "required": True},
+        },
+        handler=_delete_file,
+        example={"tool": "delete_file", "arguments": {"path": "stale.txt"}},
+    )
+)
+register_tool(
+    ToolSpec(
+        name="move_file",
+        summary="Move a file (or symlink) to a new path inside the workspace.",
+        arguments_schema={
+            "path": {"type": "string", "description": "Source path relative to workspace.", "required": True},
+            "destination": {"type": "string", "description": "Destination path relative to workspace; may be an existing directory.", "required": True},
+        },
+        handler=_move_file,
+        example={"tool": "move_file", "arguments": {"path": "a.py", "destination": "src/a.py"}},
+    )
+)
+register_tool(
+    ToolSpec(
+        name="copy_file",
+        summary="Copy a regular file to a new path inside the workspace.",
+        arguments_schema={
+            "path": {"type": "string", "description": "Source path relative to workspace.", "required": True},
+            "destination": {"type": "string", "description": "Destination path relative to workspace; may be an existing directory.", "required": True},
+        },
+        handler=_copy_file,
+        example={"tool": "copy_file", "arguments": {"path": "a.py", "destination": "src/a.py"}},
+    )
+)
+register_tool(
+    ToolSpec(
+        name="set_plan",
+        summary="Record the structured implementation plan for the task. The plan is shown to the operator and drives BUILD execution.",
+        arguments_schema={
+            "plan": {"type": "any", "description": "Ordered list of plan steps. Each item is a string or {\"step\": ..., \"detail\": ...}. May also be a multi-line string.", "required": True},
+            "goal": {"type": "string", "description": "One-sentence statement of the goal; optional.", "required": False},
+        },
+        handler=_set_plan,
+        example={"tool": "set_plan", "arguments": {"goal": "Add a CLI flag", "plan": ["Inspect CLI parser", "Add the flag", "Run tests"]}},
+    )
+)
+register_tool(
+    ToolSpec(
         name="run_command",
         summary="Run a development command from the workspace root (pytest, python, git, ruff, ...).",
         arguments_schema={
@@ -546,6 +748,15 @@ register_tool(
         },
         handler=_run_command,
         example={"tool": "run_command", "arguments": {"command": "pytest", "timeout": 120}},
+    )
+)
+register_tool(
+    ToolSpec(
+        name="inspect_environment",
+        summary="Report host/platform facts: OS, shell, python/pip/pytest/git availability, workspace root.",
+        arguments_schema={},
+        handler=_inspect_environment,
+        example={"tool": "inspect_environment", "arguments": {}},
     )
 )
 register_tool(
@@ -603,6 +814,8 @@ def _validate_args(spec: ToolSpec, arguments: dict[str, Any]) -> dict[str, Any]:
             checked[key] = _opt_int(arguments, key, meta.get("default", 0))
         elif meta["type"] == "boolean":
             checked[key] = _opt_bool(arguments, key, meta.get("default", False))
+        elif meta["type"] == "any":
+            checked[key] = _opt_any(arguments, key, meta.get("default"))
     extra = set(arguments) - set(schema)
     if extra:
         unknown = ", ".join(sorted(extra))

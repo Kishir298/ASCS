@@ -134,6 +134,59 @@ def parse_model_reply(text: str) -> ModelReply:
     return ModelReply(comment=comment, tool=tool, arguments=arguments, raw=raw)
 
 
+class Plan:
+    """A structured implementation plan produced by the ``set_plan`` tool.
+
+    Tolerates a range of model outputs (list of strings, list of ``{"step":
+    ..., "detail": ...}`` dicts, or a plain multi-line string) and renders
+    them deterministically for logs, the UI, and BUILD-mode review.
+    """
+
+    def __init__(self, steps: list[str], goal: str = "") -> None:
+        self.steps = [str(s) for s in steps]
+        self.goal = goal
+
+    @classmethod
+    def from_value(cls, value: Any) -> "Plan":
+        """Build a Plan from a relaxed JSON value; never raises."""
+        goal = ""
+        raw_steps: list[str] = []
+        if isinstance(value, str):
+            raw_steps = [ln.strip() for ln in value.splitlines() if ln.strip()]
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str):
+                    raw_steps.append(item.strip())
+                elif isinstance(item, dict):
+                    step = item.get("step")
+                    if not step and "detail" in item:
+                        step = item["detail"]
+                    elif isinstance(step, str) and item.get("detail"):
+                        raw_steps.append(f"{step}: {item['detail']}")
+                    if step:
+                        raw_steps.append(str(step).strip())
+        elif isinstance(value, dict):
+            goal = value.get("goal") or ""
+            plan = value.get("plan")
+            return cls.from_value(plan)
+        if not raw_steps:
+            return cls(["No explicit plan provided."], goal)
+        return cls(raw_steps, goal)
+
+    @property
+    def ok(self) -> bool:
+        return bool(self.steps)
+
+    def to_text(self) -> str:
+        lines = [f"Goal: {self.goal}"] if self.goal else []
+        for i, step in enumerate(self.steps, 1):
+            lines.append(f"{i}. {step}")
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"goal": self.goal, "steps": self.steps}
+
+
 def tool_result_message(tool_result: "ToolResult") -> dict[str, str]:
     """Format a ToolResult as a chat message for the model.
 
@@ -176,3 +229,13 @@ class ToolResult:
         return (
             f"Tool {self.name} FAILED: {self.output}"
         )
+
+
+__all__ = [
+    "Plan",
+    "ModelReply",
+    "ToolResult",
+    "parse_model_reply",
+    "tool_result_message",
+    "truncate",
+]

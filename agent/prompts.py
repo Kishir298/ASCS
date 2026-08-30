@@ -1,34 +1,116 @@
 """Prompt construction for the agent loop.
 
 Keeps all model-facing text in one place so the response contract is easy to
-tune and stays consistent.
+tune and stays consistent. The system prompt is mode-aware: PLAN sessions are
+read-only, BUILD sessions emphasize recording an approved plan before editing,
+and AUTO sessions run end-to-end autonomously.
 """
 
 from __future__ import annotations
 
 import datetime
+import os
+import platform
+import shutil
+import sys
 
 from .config import AgentConfig
 from .tools import TOOL_SPECS, tool_schema_text
 
 
+def _environment_text() -> str:
+    """Facts about the host so the model follows real workflows, not guesses."""
+    if os.name == "nt":
+        shell = "cmd.exe (Windows command processor)"
+        tips = (
+            "- Use Windows-aware commands: `dir`, `type`, `copy`, `move`, "
+            "`del`, `findstr`, or PowerShell via "
+            "`powershell -NoProfile -Command \"...\"`.\n"
+            "- Prefer `python -m pytest`, `python -m pip` so the correct "
+            "interpreter is used.\n"
+            "- venv activation on Windows: `env\\Scripts\\activate.bat`; "
+            "you may also call the venv's python directly."
+        )
+        launcher = shutil.which("python") or "(see run_command env PATH)"
+    else:
+        shell = "/bin/sh (POSIX shell)"
+        tips = (
+            "- Use standard POSIX tools; prefer `python3 -m pytest`.\n"
+            "- venv activation: `source env/bin/activate`."
+        )
+        launcher = shutil.which("python3") or shutil.which("python") or "python3"
+    pyexe = sys.executable
+    return (
+        "ENVIRONMENT (facts about your host - follow these, not generic habits)\n"
+        f"- Operating system: {platform.system()} ({os.name}).\n"
+        f"- run_command executes through {shell}.\n"
+        f"- The running interpreter is available as `python` inside "
+        "run_command (its directory is prepended to PATH): "
+        f"{pyexe}\n"
+        f"- `python` on PATH elsewhere: {launcher}\n"
+        f"- git available: {bool(shutil.which('git'))}\n"
+        f"{tips}"
+    )
+
+
 def _enabled_tool_text(config: AgentConfig) -> str:
     """Render the prompt reference using only session-enabled tools."""
-    names = [name for name in config.tools if name in TOOL_SPECS]
-    if len(names) != len(config.tools):
-        missing = set(config.tools) - set(names)
+    names = [name for name in config.effective_tools if name in TOOL_SPECS]
+    if len(names) != len(config.effective_tools):
+        missing = set(config.effective_tools) - set(names)
         raise ValueError(f"config.tools contains unknown tools: {sorted(missing)}")
     return tool_schema_text(names)
 
 
+def _mode_instructions(config: AgentConfig) -> str:
+    if config.is_plan_mode:
+        return (
+            "MODE: PLAN\n"
+            "You are producing an implementation plan; you must NOT modify the "
+            "workspace. Only inspection tools are available to you "
+            "(list_directory, read_file, search_files, git_status, git_diff) "
+            "plus set_plan.\n"
+            "- Inspect the repository enough to produce a concrete, ordered plan:\n"
+            "  read the relevant files, locate tests and entry points.\n"
+            "- Call set_plan with the goal and an ordered list of steps.\n"
+            "- Finish with {\"done\": true, \"summary\": \"...\"} summarizing the plan."
+        )
+    if config.is_build_mode:
+        approval = (
+            "\n- Modification and command tools may prompt for operator approval "
+            "before they run; if a call is declined, do not repeat it blindly."
+            if config.approval
+            else ""
+        )
+        return (
+            "MODE: BUILD\n"
+            "You are executing an implementation for an operator who has approved "
+            "the task. Work like a coding engineer:\n"
+            "- First inspect the workspace and record a short concrete plan with "
+            "set_plan before the first write.\n"
+            "- Then implement, run tests, fix failures, and verify results.\n"
+            "- Finish with {\"done\": true, \"summary\": \"...\"} describing what "
+            "changed and how it was verified."
+            f"{approval}"
+        )
+    return (
+        "MODE: AUTO\n"
+        "You are fully autonomous. Given a high-level request you plan, inspect, "
+        "implement, test, debug, and verify until the task is genuinely done.\n"
+        "- Record a short plan with set_plan early so the operator can see your "
+        "intended approach.\n"
+        "- Keep iterating (inspect -> change -> test) until verification passes.\n"
+        "- Finish with {\"done\": true, \"summary\": \"...\"} that reports changes "
+        "and verification evidence."
+    )
+
+
 def system_prompt(config: AgentConfig) -> str:
     today = datetime.date.today().isoformat()
-    safe_note = (
-        "- MODE: SAFE. Before executing write_file, apply_patch, or "
-        "run_command you may be prompted for approval by the operator."
-    )
     tools = _enabled_tool_text(config)
-    return f"""You are RISARMS coding agent, an autonomous local coding assistant.
+    mode_section = _mode_instructions(config)
+    env_section = _environment_text()
+    return f"""You are the A.S.C.S. coding agent (A Smart Coding System), an autonomous local coding assistant backed by Ollama.
 
 Current date: {today}
 
@@ -36,10 +118,7 @@ You are working inside a repository rooted at the workspace directory. You
 MAY use file tools and run development commands there. You must NEVER modify
 anything outside the workspace.
 
-TASK
-====
-The user task was given above. Complete it autonomously. Plan, inspect,
-modify, run tests, diagnose failures, and iterate until the task is done.
+{mode_section}
 
 RESPONSE CONTRACT
 =================
@@ -62,6 +141,8 @@ AVAILABLE TOOLS
 ===============
 {tools}
 
+{env_section}
+
 WORKING RULES
 =============
 - Explore before you edit: list/read the relevant files first.
@@ -78,8 +159,6 @@ WORKING RULES
   your own changes by re-running the relevant checks/tests when appropriate.
 - When every requested outcome is achieved, reply with a "done" object and a
   summary of the changes and verification results.
-
-{safe_note}
 """
 
 
