@@ -1,0 +1,254 @@
+"""Structured agent events for observability / UI consumption.
+
+The agent loop emits :class:`AgentEvent` objects at real lifecycle points
+(start, thinking, tool, command, file change, error, stop, done). Consumers
+(the web UI or any future ASIS/TIVISS integration) subscribe via an
+``event_sink`` callable and receive structured JSON rather than parsing
+terminal strings.
+
+Events carry concise *operational* status only. They NEVER expose the model's
+private chain-of-thought; ``agent_thinking`` carries just a short human-readable
+display phrase such as "Inspecting the test suite...".
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import asdict, dataclass, field
+from typing import Any, Callable
+
+# Full set of event types the loop may emit.
+EVENT_TYPES = (
+    "agent_started",
+    "agent_thinking",
+    "tool_started",
+    "tool_completed",
+    "file_read",
+    "file_written",
+    "patch_applied",
+    "command_started",
+    "command_completed",
+    "test_started",
+    "test_completed",
+    "agent_error",
+    "agent_stopped",
+    "agent_completed",
+    "mode_changed",
+    "activity",
+    "status",
+)
+
+
+@dataclass(frozen=True)
+class AgentEvent:
+    """A structured, JSON-serializable event emitted by the agent loop."""
+
+    type: str
+    message: str = ""
+    tool: str | None = None
+    target: str | None = None
+    command: str | None = None
+    exit_code: int | None = None
+    ok: bool | None = None
+    mode: str | None = None
+    status: str | None = None
+    summary: str | None = None
+    error: str | None = None
+    elapsed: float | None = None
+    timestamp: float = field(default_factory=time.time)
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        # Drop None fields to keep payloads small over the wire.
+        return {k: v for k, v in data.items() if v is not None}
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict())
+
+
+# A synchronous event sink; receives AgentEvent objects.
+EventSink = Callable[[AgentEvent], None]
+
+
+def null_sink(event: AgentEvent) -> None:
+    """Default sink that discards events."""
+
+
+def _emit(sink: EventSink | None, event: AgentEvent) -> None:
+    """Deliver an event, swallowing sink errors so a broken consumer never
+    crashes the agent loop."""
+    if sink is None:
+        return
+    try:
+        sink(event)
+    except Exception:  # pragma: no cover - defensive; UI must not crash engine
+        pass
+
+
+# -- convenience emitters ----------------------------------------------------
+
+
+def emit_started(sink: EventSink | None, message: str = "") -> None:
+    _emit(sink, AgentEvent(type="agent_started", message=message or "Agent started"))
+
+
+def emit_thinking(
+    sink: EventSink | None,
+    message: str = "",
+    *,
+    elapsed: float | None = None,
+) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="agent_thinking",
+            message=message or "Model is thinking...",
+            elapsed=elapsed,
+        ),
+    )
+
+
+def emit_tool_started(
+    sink: EventSink | None, tool: str, target: str | None = None
+) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="tool_started",
+            tool=tool,
+            target=target,
+            message=f"Tool {tool} started",
+        ),
+    )
+
+
+def emit_tool_completed(
+    sink: EventSink | None,
+    tool: str,
+    *,
+    ok: bool,
+    target: str | None = None,
+    elapsed: float | None = None,
+) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="tool_completed",
+            tool=tool,
+            target=target,
+            ok=ok,
+            elapsed=elapsed,
+            message=f"Tool {tool} {'completed' if ok else 'failed'}",
+        ),
+    )
+
+
+def emit_status(sink: EventSink | None, status: str, message: str = "") -> None:
+    _emit(
+        sink,
+        AgentEvent(type="status", status=status, message=message or status),
+    )
+
+
+def emit_activity(sink: EventSink | None, message: str) -> None:
+    _emit(sink, AgentEvent(type="activity", message=message))
+
+
+def emit_file_event(
+    sink: EventSink | None,
+    event_type: str,
+    path: str,
+    *,
+    ok: bool = True,
+) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type=event_type,
+            target=path,
+            ok=ok,
+            message=f"{event_type}: {path}",
+        ),
+    )
+
+
+def emit_command_started(sink: EventSink | None, command: str) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="command_started",
+            command=command,
+            message=f"Running: {command}",
+        ),
+    )
+
+
+def emit_command_completed(
+    sink: EventSink | None,
+    command: str,
+    *,
+    exit_code: int,
+    ok: bool = True,
+    elapsed: float | None = None,
+) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="command_completed",
+            command=command,
+            exit_code=exit_code,
+            ok=ok,
+            elapsed=elapsed,
+            message=f"Command exited with code {exit_code}",
+        ),
+    )
+
+
+def emit_test_completed(
+    sink: EventSink | None,
+    command: str,
+    *,
+    exit_code: int,
+    ok: bool = True,
+    elapsed: float | None = None,
+) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="test_completed",
+            command=command,
+            exit_code=exit_code,
+            ok=ok,
+            elapsed=elapsed,
+            message=f"Tests {'passed' if ok else 'failed'} (exit {exit_code})",
+        ),
+    )
+
+
+def emit_completed(
+    sink: EventSink | None,
+    message: str,
+    *,
+    summary: str = "",
+    iter_count: int = 0,
+) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="agent_completed",
+            message=message,
+            summary=summary or message,
+        ),
+    )
+
+
+def emit_error(sink: EventSink | None, message: str, error: str = "") -> None:
+    _emit(
+        sink,
+        AgentEvent(type="agent_error", message=message, error=error or message),
+    )
+
+
+def emit_stopped(sink: EventSink | None, message: str = "Agent stopped") -> None:
+    _emit(sink, AgentEvent(type="agent_stopped", message=message))

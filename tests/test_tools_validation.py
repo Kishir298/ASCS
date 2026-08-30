@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from agent.models import ToolResult
 from agent.tools import ToolValidationError, execute_tool, validate_tool_call
 from agent.workspace import Workspace
 

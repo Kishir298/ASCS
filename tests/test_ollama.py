@@ -22,6 +22,18 @@ class _Handler(BaseHTTPRequestHandler):
 
     status_map: dict = {}
     raw_body: bytes | None = None
+    # Close each connection cleanly after one response. This avoids a
+    # Windows keep-alive RST race between MockServer and urllib that would
+    # otherwise intermittently abort reads with ConnectionAbortedError.
+    protocol_version = "HTTP/1.0"
+
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length > 0:
+            try:
+                self.rfile.read(length)
+            except (OSError, ValueError):
+                pass
 
     def _respond(self):
         status = type(self).status_map.get(self.path.split("?")[0], 200)
@@ -64,6 +76,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._respond()
 
     def do_POST(self):
+        self._read_body()
         self._respond()
 
     def log_message(self, *args):
@@ -128,7 +141,7 @@ def test_chat_ndjson(server):
     lines = [
         {"message": {"content": '{"co'}},
         {"message": {"content": 'mment":"hi","tool'}},
-        {"message": {"content": ':"list_directory","arguments":{"path":"."}}'}},
+        {"message": {"content": '":"list_directory","arguments":{"path":"."}}'}},
         {"done": True},
     ]
     server.set(body=("\n".join(json.dumps(l) for l in lines) + "\n").encode())

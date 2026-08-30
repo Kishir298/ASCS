@@ -84,6 +84,10 @@ class OllamaClient:
             url, data=data, headers={"Content-Type": "application/json"},
             method="POST",
         )
+        # Explicitly close the connection after each request. On Windows this
+        # avoids a keep-alive RST race with local servers that otherwise aborts
+        # reads with ConnectionAbortedError; it also stays robust across tools.
+        req.add_header("Connection", "close")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.read()
@@ -108,8 +112,10 @@ class OllamaClient:
 
     def _get(self, endpoint: str, timeout: int) -> bytes:
         url = f"{self.base_url}{endpoint}"
+        req = urllib.request.Request(url)
+        req.add_header("Connection", "close")
         try:
-            with urllib.request.urlopen(url, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.read()
         except urllib.error.HTTPError as exc:
             raise OllamaHTTPError(exc.code, f"GET {endpoint} failed") from exc
@@ -233,6 +239,7 @@ class OllamaClient:
             url, data=data, headers={"Content-Type": "application/json"},
             method="POST",
         )
+        req.add_header("Connection", "close")
         try:
             with urllib.request.urlopen(req, timeout=timeout or self.request_timeout) as resp:
                 for raw_line in resp:

@@ -48,6 +48,26 @@ def should_ignore(name: str) -> bool:
     return name.lower().endswith(IGNORED_SUFFIXES)
 
 
+def _remove_link(path: Path) -> None:
+    """Remove a symlink/junction without traversing into its target.
+
+    ``shutil.rmtree`` refuses to remove a symbolic link in Python 3.12+; a
+    junction/symlink should be removed with ``os.remove``/``os.rmdir``, which
+    only removes the link itself and never its target.
+    """
+    if not path.exists() and not path.is_symlink():
+        return
+    try:
+        os.remove(path)
+    except (FileNotFoundError, NotADirectoryError):
+        pass
+    except OSError:
+        try:
+            os.rmdir(path)
+        except OSError:
+            pass
+
+
 class Workspace:
     def __init__(self, root: str | os.PathLike[str]) -> None:
         try:
@@ -64,6 +84,23 @@ class Workspace:
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"Workspace({self._root})"
 
+    @staticmethod
+    def _is_root_relative(raw: str) -> bool:
+        """True for a POSIX-style root-relative path ("/x" or "\\x").
+
+        Excludes drive-letter paths (``C:\\x``) and UNC paths
+        (``\\\\server\\share``), both of which are true absolute paths. A bare
+        leading separator with no drive is treated as a path relative to the
+        workspace root regardless of the host OS.
+        """
+        if not raw.startswith(("/", "\\")):
+            return False
+        if raw.startswith("\\\\") or raw.startswith("//"):
+            return False
+        if Path(raw).drive:
+            return False
+        return True
+
     def resolve(self, path: str | os.PathLike[str] | None) -> Path:
         """Resolve a user/model-supplied path against the workspace root.
 
@@ -75,7 +112,13 @@ class Workspace:
             path = "."
         raw = os.path.expanduser(str(path))
         candidate = Path(raw)
-        if not candidate.is_absolute():
+        if self._is_root_relative(raw):
+            # A bare leading-separator path ("/x" or "\\x", no drive, not UNC)
+            # is interpreted as relative to the WORKSPACE root (POSIX-style).
+            # On Windows, Path("/x") is non-absolute but joining it to the
+            # root would drop the root, so strip the leading separator first.
+            candidate = self._root / raw.lstrip("/\\")
+        elif not candidate.is_absolute():
             candidate = self._root / candidate
         candidate = Path(os.path.normpath(candidate))
 

@@ -415,6 +415,11 @@ def _git_command(
     combined = (proc.stdout or "") + (proc.stderr or "")
     rc = proc.returncode
     if rc != 0:
+        # Working in a directory that is not a git repo is not an error: the
+        # agent should proceed, not treat it as a retryable failure.
+        lowered = combined.strip().lower()
+        if rc == 128 and "not a git repository" in lowered:
+            return ToolResult(name, "(not a git repository)", note="exit code 128")
         return ToolResult(name, combined.strip() or f"git exited with {rc}", ok=False)
     body = combined.strip() or {"git_status": "(clean working tree)", "git_diff": "(no changes)"}[name]
     return ToolResult(name, body, note=f"exit code 0")

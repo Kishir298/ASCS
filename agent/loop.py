@@ -9,10 +9,24 @@ in SAFE mode modifications and commands require operator approval.
 from __future__ import annotations
 
 import json as _json
+import threading
+import time as _time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .config import AgentConfig
+from .events import (
+    EventSink,
+    emit_activity,
+    emit_completed,
+    emit_error,
+    emit_started,
+    emit_status,
+    emit_thinking,
+    emit_tool_completed,
+    emit_tool_started,
+    null_sink,
+)
 from .models import ToolResult, parse_model_reply, tool_result_message
 from .ollama import (
     OllamaClient,
@@ -43,6 +57,14 @@ RETRY_PROMPT = (
 )
 
 
+def _content(message: dict[str, str]) -> str:
+    """Read the ``content`` field robustly (guards against malformed data)."""
+    if not isinstance(message, dict):
+        return ""
+    value = message.get("content")
+    return value if isinstance(value, str) else ""
+
+
 @dataclass
 class LoopResult:
     status: str = "interrupted"  # completed|max_iterations|interrupted|fatal|malformed
@@ -67,18 +89,23 @@ class AgentLoop:
         *,
         approver: Callable[[str], bool] | None = None,
         log: Callable[[str], None] | None = None,
+        event_sink: EventSink | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> None:
         self.config = config
         self.client = client
         self.ws = workspace
         self.log = log or (lambda _msg: None)
+        self.event_sink = event_sink or null_sink
         self.approver = approver if approver is not None else DEFAULT_APPROVER
+        self.should_stop = should_stop or (lambda: False)
         self._steps: list[str] = []
         self._messages: list[dict[str, str]] = []
         self._malformed_count = 0
         self._last_call: tuple[Any, ...] | None = None
         self._last_ok = True
         self._repeat_count = 0
+        self._interrupted = False
 
     # -- logging ------------------------------------------------------------
 
@@ -89,7 +116,10 @@ class AgentLoop:
     # -- main entry ---------------------------------------------------------
 
     def run(self, task: str) -> LoopResult:
-        self._messages = [system_prompt(self.config), task_message(task)]
+        self._messages = [
+            {"role": "system", "content": system_prompt(self.config)},
+            task_message(task),
+        ]
         self._step(f"Task received: {task[:300]}")
         self._step(f"Workspace: {self.ws.root}")
         self._step(
@@ -242,10 +272,11 @@ class AgentLoop:
     def _messages_for_request(self) -> list[dict[str, str]]:
         messages = list(self._messages)
         budget = self.config.context_budget_chars
-        total = sum(len(m.get("content") or "") for m in messages)
-        while total > budget and len(messages) > 2:
+        total = sum(len(_content(m)) for m in messages)
+        # Never trim the system prompt (index 0) or the user task (index 1).
+        while total > budget and len(messages) > 3:
             removed = messages.pop(2)
-            total -= len(removed.get("content") or "")
+            total -= len(_content(removed))
         return messages
 
     def _is_repeated_call(self, tool: str, arguments: dict[str, Any]) -> bool:

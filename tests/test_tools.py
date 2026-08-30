@@ -137,8 +137,10 @@ def test_apply_patch_ambiguous(tmp_path, config):
 
 
 def test_run_command_success(tmp_path, config):
+    # Use single quotes inside the Python -c string: on Windows cmd, double
+    # quotes are stripped and would break the embedded strings.
     code = (
-        'import sys; print("hello-out"); print("hello-err", file=sys.stderr); '
+        "import sys; print('hello-out'); print('hello-err', file=sys.stderr); "
         "sys.exit(3)"
     )
     r = execute_tool(

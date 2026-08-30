@@ -81,10 +81,11 @@ def test_junction_escape_rejected(tmp_path):
         with pytest.raises(WorkspaceError):
             ws.resolve("link/secret.txt")
     finally:
-        import shutil
-
-        if junction.exists():
-            shutil.rmtree(junction)
+        from agent.workspace import _remove_link
+        _remove_link(junction)
+        if outside.exists():
+            import shutil
+            shutil.rmtree(outside, ignore_errors=True)
 
 
 def test_ignore_rules():
