@@ -575,7 +575,10 @@ class ProjectIndex:
         query_terms = self._terms(query)
 
         if not query_terms:
-            return list(self.records.values())[:limit]
+            return sorted(
+                self.records.values(),
+                key=lambda record: record.path,
+            )[:limit]
 
         scored: list[tuple[int, FileRecord]] = []
 
