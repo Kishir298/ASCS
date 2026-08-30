@@ -20,6 +20,11 @@ def test_all_required_tools_registered():
         "write_file",
         "apply_patch",
         "run_command",
+        "delete_file",
+        "move_file",
+        "copy_file",
+        "set_plan",
+        "inspect_environment",
         "git_status",
         "git_diff",
     }
@@ -35,6 +40,11 @@ def test_tool_schema_text_mentions_all():
         "write_file",
         "apply_patch",
         "run_command",
+        "delete_file",
+        "move_file",
+        "copy_file",
+        "set_plan",
+        "inspect_environment",
         "git_status",
         "git_diff",
     ):
@@ -186,3 +196,108 @@ def test_missing_required_argument(tmp_path, config):
 def test_validate_invalid_type_raises():
     with pytest.raises(ToolValidationError):
         validate_tool_call("read_file", {"path": 123})
+
+
+def test_delete_file(tmp_path, config):
+    ws = Workspace(tmp_path)
+    (tmp_path / "gone.py").write_text("x = 1")
+    r = execute_tool("delete_file", {"path": "gone.py"}, ws, config)
+    assert r.ok
+    assert not (tmp_path / "gone.py").exists()
+
+
+def test_delete_file_missing_is_reported(tmp_path, config):
+    ws = Workspace(tmp_path)
+    r = execute_tool("delete_file", {"path": "missing.txt"}, ws, config)
+    assert not r.ok  # deleting a file that never existed is a failure
+
+
+def test_delete_file_refuses_root(tmp_path, config):
+    ws = Workspace(tmp_path)
+    r = execute_tool("delete_file", {"path": "."}, ws, config)
+    assert not r.ok
+
+
+def test_delete_file_refuses_vcs_metadata(tmp_path, config):
+    ws = Workspace(tmp_path)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".gitignore").write_text("x")
+    r1 = execute_tool("delete_file", {"path": ".gitignore"}, ws, config)
+    assert not r1.ok
+    r2 = execute_tool("delete_file", {"path": ".git"}, ws, config)
+    assert not r2.ok
+    assert (tmp_path / ".gitignore").read_text() == "x"
+
+
+def test_delete_file_refuses_directories(tmp_path, config):
+    ws = Workspace(tmp_path)
+    (tmp_path / "folder").mkdir()
+    r = execute_tool("delete_file", {"path": "folder"}, ws, config)
+    assert not r.ok
+
+
+def test_move_file(tmp_path, config):
+    ws = Workspace(tmp_path)
+    (tmp_path / "a.txt").write_text("data")
+    r = execute_tool("move_file", {"path": "a.txt", "destination": "b/c.txt"}, ws, config)
+    assert r.ok
+    assert not (tmp_path / "a.txt").exists()
+    assert (tmp_path / "b" / "c.txt").read_text() == "data"
+
+
+def test_move_file_into_directory(tmp_path, config):
+    ws = Workspace(tmp_path)
+    (tmp_path / "a.txt").write_text("data")
+    (tmp_path / "src").mkdir()
+    r = execute_tool("move_file", {"path": "a.txt", "destination": "src"}, ws, config)
+    assert r.ok
+    assert (tmp_path / "src" / "a.txt").exists()
+
+
+def test_move_file_refuses_root(tmp_path, config):
+    ws = Workspace(tmp_path)
+    r = execute_tool("move_file", {"path": ".", "destination": "x"}, ws, config)
+    assert not r.ok
+
+
+def test_copy_file(tmp_path, config):
+    ws = Workspace(tmp_path)
+    (tmp_path / "src.txt").write_text("data")
+    r = execute_tool("copy_file", {"path": "src.txt", "destination": "dst.txt"}, ws, config)
+    assert r.ok
+    assert (tmp_path / "dst.txt").read_text() == "data"
+    assert (tmp_path / "src.txt").exists()
+
+
+def test_set_plan(tmp_path, config):
+    ws = Workspace(tmp_path)
+    r = execute_tool("set_plan", {"goal": "g", "plan": ["one", "two"]}, ws, config)
+    assert r.ok
+    assert "recommended first step" in r.output or "one" in r.output
+
+
+def test_set_plan_from_formatted_updates_step(tmp_path, config):
+    ws = Workspace(tmp_path)
+    r = execute_tool(
+        "set_plan",
+        {
+            "plan": [
+                "1. inspect",
+                "2. implement feature X",
+                "- [ ] design review",
+                "4. run tests stub",
+            ]
+        },
+        ws,
+        config,
+    )
+    assert r.ok
+    assert "implement feature X" in r.output
+
+
+def test_inspect_environment_returns_facts(tmp_path, config):
+    r = execute_tool("inspect_environment", {}, Workspace(tmp_path), config)
+    assert r.ok
+    assert "os:" in r.output
+    assert "workspace:" in r.output
+    assert sys.platform in r.output

@@ -38,7 +38,14 @@ MODES = ("PLAN", "BUILD", "AUTO")
 
 # Tools that modify the workspace / run arbitrary commands. In PLAN mode these
 # are removed from the enabled set.
-PLAN_MODE_BLOCKED = {"write_file", "apply_patch", "delete_file", "run_command"}
+PLAN_MODE_BLOCKED = {
+    "write_file",
+    "apply_patch",
+    "delete_file",
+    "move_file",
+    "copy_file",
+    "run_command",
+}
 
 # Tools the agent may use without operator approval even in SAFE mode.
 READONLY_TOOLS = {

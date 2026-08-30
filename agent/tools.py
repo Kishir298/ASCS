@@ -360,6 +360,8 @@ def _move_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
     destination = _require(args, "destination", str)
     src = ws.resolve(path)
     dst = ws.resolve(destination)
+    if src == ws.root:
+        raise ToolValidationError("Refusing to move the workspace root itself.")
     if not src.exists() and not src.is_symlink():
         raise ToolValidationError(f"Source does not exist: {path}")
     if dst.exists():

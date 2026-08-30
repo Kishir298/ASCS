@@ -37,6 +37,7 @@ from .state import IDLE, STATE_LABELS, StateTracker
 from .workspace import Workspace
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
+INDEX_HTML: str | None = None
 
 
 def _load_index() -> str:

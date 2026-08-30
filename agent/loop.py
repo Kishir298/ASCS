@@ -457,7 +457,7 @@ class AgentLoop:
             )
 
         if tool == "set_plan" and result.ok:
-            plan = Plan.from_value(arguments.get("plan") or arguments.get("goal"))
+            plan = Plan.from_value(arguments)
             self._plan = plan
             result_note = "plan recorded"
             self._step(f"[{iteration:02d}] Plan recorded ({len(plan.steps)} steps).")

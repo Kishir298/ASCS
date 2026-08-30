@@ -22,6 +22,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     status_map: dict = {}
     raw_body: bytes | None = None
+    captured_body: bytes | None = None
     # Close each connection cleanly after one response. This avoids a
     # Windows keep-alive RST race between MockServer and urllib that would
     # otherwise intermittently abort reads with ConnectionAbortedError.
@@ -31,7 +32,7 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0) or 0)
         if length > 0:
             try:
-                self.rfile.read(length)
+                type(self).captured_body = self.rfile.read(length)
             except (OSError, ValueError):
                 pass
 
@@ -98,6 +99,7 @@ def server():
     def set(**kwargs):
         handler.status_map = kwargs.get("status", {})
         handler.raw_body = kwargs.get("body")
+        handler.captured_body = None
 
     yield types.SimpleNamespace(base=base, set=set, handler=handler)
     httpd.shutdown()
@@ -183,3 +185,87 @@ def test_chat_garbage_body(server):
     client = OllamaClient(base_url=server.base)
     with pytest.raises(OllamaResponseError):
         client.chat([{"role": "user", "content": "hi"}])
+
+
+def test_chat_sends_keep_alive_from_instance(server):
+    server.set(
+        body=json.dumps({"message": {"content": "ok"}, "done": True}).encode()
+    )
+    client = OllamaClient(base_url=server.base, keep_alive="30m")
+    client.chat([{"role": "user", "content": "hi"}])
+    payload = json.loads(server.handler.captured_body.decode())
+    assert payload["keep_alive"] == "30m"
+    assert payload["stream"] is False
+    assert payload["model"] == client.model
+
+
+def test_chat_keep_alive_call_arg_overrides_instance(server):
+    server.set(
+        body=json.dumps({"message": {"content": "ok"}, "done": True}).encode()
+    )
+    client = OllamaClient(base_url=server.base, keep_alive="1m")
+    client.chat([{"role": "user", "content": "hi"}], keep_alive="10m")
+    payload = json.loads(server.handler.captured_body.decode())
+    assert payload["keep_alive"] == "10m"
+
+
+def test_chat_no_keep_alive_key_when_unset(server):
+    server.set(
+        body=json.dumps({"message": {"content": "ok"}, "done": True}).encode()
+    )
+    client = OllamaClient(base_url=server.base, keep_alive=None)
+    client.chat([{"role": "user", "content": "hi"}])
+    payload = json.loads(server.handler.captured_body.decode())
+    assert "keep_alive" not in payload
+
+
+def test_ensure_ready_report(server):
+    client = OllamaClient(base_url=server.base, model="qwen2.5-coder:7b")
+    report = client.ensure_ready(check_timeout=5, prewarm=False)
+    assert report["reachable"] is True
+    assert report["available"] is True
+    assert "qwen2.5-coder:7b" in report["installed"]
+    assert report["version"] == "0.3.0"
+    assert report["warmed"] is False
+
+
+def test_ensure_ready_prewarm_false_avoids_warm(server):
+    client = OllamaClient(base_url=server.base, model="qwen2.5-coder:7b")
+    report = client.ensure_ready(check_timeout=5, prewarm=False)
+    assert report["warmed"] is False
+
+
+class _FakeResp:
+    def __init__(self):
+        self.closed = 0
+
+    def close(self):
+        self.closed += 1
+
+
+def test_abort_current_closes_active_response():
+    client = OllamaClient(base_url="http://127.0.0.1:11434")
+    resp = _FakeResp()
+    assert client._active is None
+    client._track(resp, 60)
+    assert client._active is resp
+    client.abort_current()
+    assert resp.closed == 1
+    assert client._active is None
+
+
+def test_abort_current_without_active_is_noop():
+    client = OllamaClient(base_url="http://127.0.0.1:11434")
+    client.abort_current()  # must not raise
+    assert client._active is None
+
+
+def test_untrack_ignores_other_response():
+    client = OllamaClient(base_url="http://127.0.0.1:11434")
+    a = _FakeResp()
+    b = _FakeResp()
+    client._track(a, 60)
+    client._untrack(b)  # different resp: must keep tracking a
+    assert client._active is a
+    client._untrack(a)
+    assert client._active is None

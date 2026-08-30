@@ -168,7 +168,8 @@ class Plan:
         elif isinstance(value, dict):
             goal = value.get("goal") or ""
             plan = value.get("plan")
-            return cls.from_value(plan)
+            sub = cls.from_value(plan)
+            return cls(sub.steps, goal or sub.goal)
         if not raw_steps:
             return cls(["No explicit plan provided."], goal)
         return cls(raw_steps, goal)

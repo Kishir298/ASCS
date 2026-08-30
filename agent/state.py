@@ -148,13 +148,22 @@ class StateTracker:
             self._snapshot.ended_at = None
 
     def finish(self, state: str, message: str = "") -> None:
+        if not is_valid_state(state):
+            raise ValueError(f"Unknown state {state!r}")
         with self._lock:
+            prev = self._snapshot.state
             self._snapshot.ended_at = _time.time()
             self._snapshot.message = message
             # Preserve the substantive body state (FAILED/CANCELLED/TIMEOUT/
             # COMPLETE) as a named transition for history clarity.
             self._snapshot.transitions.append((state, _time.time()))
             self._snapshot.state = state
+        if prev != state:
+            for handler in list(self._handlers):
+                try:
+                    handler(state, prev)
+                except Exception:  # pragma: no cover - observers must not break core
+                    pass
 
     def set(self, state: str, message: str = "") -> None:
         if not is_valid_state(state):

@@ -212,3 +212,188 @@ def test_run_agent_helper(tmp_path):
     )
     result = run_agent(config, client, "task")
     assert result.status == "completed"
+
+
+def test_plan_captured_from_set_plan(tmp_path):
+    loop, _ = make_loop(
+        tmp_path,
+        [
+            tool_call(
+                "set_plan",
+                {"goal": "refactor", "plan": ["inspect", "edit", "test"]},
+            ),
+            json.dumps({"done": True, "summary": "planned"}),
+        ],
+    )
+    result = loop.run("refactor")
+    assert result.is_complete
+    assert result.plan is not None
+    assert result.plan.goal == "refactor"
+    assert result.plan.steps == ["inspect", "edit", "test"]
+
+
+def test_state_machine_reaches_complete(tmp_path):
+    loop, _ = make_loop(tmp_path, [json.dumps({"done": True, "summary": "ok"})])
+    result = loop.run("task")
+    assert result.state == "complete"
+    assert result.status == "completed"
+    assert loop.tracker.state == "complete"
+
+
+def test_cancelled_state_never_success(tmp_path):
+    loop, _ = make_loop(tmp_path, [KeyboardInterrupt()])
+    result = loop.run("task")
+    assert result.status == "interrupted"
+    assert result.state == "cancelled"
+    assert not result.is_complete
+
+
+def test_max_iterations_maps_to_timeout_state(tmp_path):
+    loop, _ = make_loop(
+        tmp_path,
+        [tool_call("git_status", {})] * 5,
+        config_overrides={"max_iterations": 2},
+    )
+    result = loop.run("keep going")
+    assert result.state == "timeout"
+    assert result.status == "max_iterations"
+
+
+def test_fatal_error_maps_to_failed_state(tmp_path):
+    loop, _ = make_loop(tmp_path, [OllamaConnectionError("offline")])
+    result = loop.run("anything")
+    assert result.state == "failed"
+    assert result.status == "fatal"
+
+
+def test_should_stop_true_aborts_with_cancelled(tmp_path):
+    loop, _ = make_loop(
+        tmp_path,
+        [json.dumps({"done": True, "summary": "should not run"})],
+        config_overrides={"max_iterations": 5},
+    )
+    loop.should_stop = lambda: True
+    result = loop.run("task")
+    assert result.status == "cancelled"
+    assert result.state == "cancelled"
+    assert result.iterations == 0
+
+
+def test_should_stop_mid_run_after_tool(tmp_path):
+    stop = {"flag": False}
+
+    def should_stop():
+        return stop["flag"]
+
+    loop, _ = make_loop(
+        tmp_path,
+        [
+            tool_call("write_file", {"path": "x.txt", "content": "hi"}),
+            tool_call("git_status", {}),
+            json.dumps({"done": True, "summary": "done"}),
+        ],
+    )
+    loop.should_stop = should_stop
+
+    # Operator presses STOP as soon as a modifying tool completes.
+    def sink(event):
+        if event.type == "tool_completed" and event.tool == "write_file":
+            stop["flag"] = True
+
+    loop.event_sink = sink
+    result = loop.run("task")
+    assert result.status == "cancelled"
+    assert result.state == "cancelled"
+    # The already-running write completed; the next step never ran.
+    assert (tmp_path / "x.txt").exists()
+
+
+def test_events_emitted_end_to_end(tmp_path):
+    events = []
+    sink = events.append
+
+    loop, _ = make_loop(
+        tmp_path,
+        [
+            tool_call("git_status", {}),
+            json.dumps({"done": True, "summary": "all good"}),
+        ],
+        config_overrides={"mode": "AUTO"},
+    )
+    loop.event_sink = sink
+    result = loop.run("task")
+    assert result.is_complete
+    types = [e.type for e in events]
+    assert "agent_started" in types
+    assert "status" in types
+    assert "agent_thinking" in types
+    assert "tool_started" in types
+    assert "tool_completed" in types
+    assert "agent_completed" in types
+    assert "mode_changed" in types
+
+
+def test_test_command_emits_test_events(tmp_path):
+    events = []
+    sink = events.append
+    loop, _ = make_loop(
+        tmp_path,
+        [
+            tool_call("run_command", {"command": "python -m pytest"}),
+            json.dumps({"done": True, "summary": "tests pass"}),
+        ],
+    )
+    loop.event_sink = sink
+    loop.run("task")
+    types = [e.type for e in events]
+    assert "command_started" in types
+    assert "command_completed" in types
+    assert "test_started" in types
+    assert "test_completed" in types
+
+
+def test_file_event_emitted_for_write(tmp_path):
+    events = []
+    sink = events.append
+    loop, _ = make_loop(
+        tmp_path,
+        [
+            tool_call("write_file", {"path": "a.txt", "content": "x"}),
+            json.dumps({"done": True, "summary": "ok"}),
+        ],
+    )
+    loop.event_sink = sink
+    loop.run("task")
+    types = [e.type for e in events]
+    assert "file_written" in types
+
+
+def test_plan_mode_build_states_via_verifying(tmp_path):
+    from agent import state
+
+    states = []
+    loop, _ = make_loop(
+        tmp_path,
+        [
+            tool_call("run_command", {"command": "pytest"}),
+            json.dumps({"done": True, "summary": "ok"}),
+        ],
+    )
+    loop.tracker.on_transition(lambda s, p: states.append(s))
+    loop.run("task")
+    assert state.VERIFYING in states
+
+
+def test_is_test_command_variants():
+    from agent.loop import is_test_command
+
+    for cmd in (
+        "pytest",
+        "pytest tests/test_x.py",
+        "python -m pytest",
+        "py -m pytest",
+        "pytest -q",
+    ):
+        assert is_test_command(cmd), cmd
+    for cmd in ("python greet.py", "git status", "npm install"):
+        assert not is_test_command(cmd), cmd

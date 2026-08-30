@@ -100,6 +100,7 @@ class OllamaClient:
         """
         with self._resp_lock:
             resp = self._active
+            self._active = None
         if resp is not None:
             try:
                 resp.close()
