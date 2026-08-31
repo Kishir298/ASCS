@@ -19,17 +19,52 @@ real STOP/cancellation.
 
 ## Requirements
 
-- Python 3.12+
+- **Python 3.12+**. ASCS declares `requires-python = ">=3.12"` and otherwise
+  uses only the standard library. It has been tested on Python 3.14. On
+  Windows, `python` / `py` must resolve to a 3.12+ interpreter. Note: the
+  Windows launcher alias `py -3.12` is not necessarily installed; any 3.12+
+  runtime satisfies the requirement.
 - [Ollama](https://ollama.com) running locally (`ollama serve`, default
   `http://localhost:11434`)
-- A code model, e.g. `ollama pull qwen3:14b`
+- A code model, e.g. `ollama pull qwen3:14b` (the default model)
 
-## Install
+## Install (Windows PowerShell)
 
-```bash
-pip install -e .
+Create a virtual environment and install the project from `requirements.txt`
+(which installs the package itself — providing the `risa` entry point — plus
+the test/development dependency):
+
+```powershell
+cd C:\Users\<you>\Desktop\RISARMS\ASCS
+
+# 1. create a fresh environment with an installed 3.12+ Python
+py -m venv .venv
+
+# 2. activate it
+.\.venv\Scripts\Activate.ps1
+
+# 3. upgrade packaging tools
+python -m pip install --upgrade pip
+
+# 4. install this project and its dependencies
+python -m pip install -r requirements.txt
+
+# 5. verify the local environment
+risa --doctor
 risa --check
 ```
+
+If you can't activate the environment, call the venv's interpreter directly:
+`.\.venv\Scripts\python.exe -m agent --doctor`.
+
+The project is a zero-runtime-dependency package (standard library only),
+so a fresh clone needs only `pip install -r requirements.txt` in a valid
+venv to run `risa`.
+
+> **No-activation alternative:** the checked-in `risa.cmd` launcher runs the
+> venv directly (`.venv\Scripts\python.exe -m agent %*`) and works without
+> activating the environment, as long as `.venv` has been created and
+> `requirements.txt` installed.
 
 The default model is `qwen3:14b`. Override it per run with
 `--model`, or set any model via environment variables (see Configuration).
@@ -261,10 +296,17 @@ Environment variables (CLI flags win, both override defaults):
 
 ## Development
 
-```bash
-pip install -e ".[dev]"
-pytest
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt   # or: python -m pip install -e ".[dev]"
+python -m pytest
 ```
+
+All tests run offline against scripted fake clients and an in-process mock
+Ollama server — **no Ollama required**. The single skipped test is the opt-in
+live-model smoke check (`test_live_model_smoke`), enabled with `RISALIVE=1`,
+which takes minutes because it talks to a real local `qwen3:14b`.
 
 Test suite covers the tool layer, the loop's lifecycle/plan/mode/cancellation
 behaviour (using scripted fake clients — no Ollama required), event emission,

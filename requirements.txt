@@ -1,1 +1,15 @@
+# A.S.C.S. dependencies.
+#
+# The project itself is a zero-runtime-dependency package (standard library
+# only; see pyproject.toml `[project].dependencies`). Installing this file
+# installs the editable package (which provides the `risa` entry point) plus
+# the test/development dependency.
+#
+# Usage (Windows PowerShell):
+#   py -m venv .venv
+#   .\.venv\Scripts\Activate.ps1
+#   python -m pip install --upgrade pip
+#   python -m pip install -r requirements.txt
+
+-e .
 pytest>=8,<10
