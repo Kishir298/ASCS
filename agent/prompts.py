@@ -105,11 +105,18 @@ def _mode_instructions(config: AgentConfig) -> str:
     )
 
 
-def system_prompt(config: AgentConfig) -> str:
+def system_prompt(config: AgentConfig, project: str | None = None) -> str:
     today = datetime.date.today().isoformat()
     tools = _enabled_tool_text(config)
     mode_section = _mode_instructions(config)
     env_section = _environment_text()
+    project_section = ""
+    if project and project.strip():
+        project_section = (
+            "PROJECT INTELLIGENCE (discovered from the repository - trust "
+            "this, it is scan-derived, not guessed)\n"
+            f"{project.strip()}\n\n"
+        )
     return f"""You are the A.S.C.S. coding agent (A Smart Coding System), an autonomous local coding assistant backed by Ollama.
 
 Current date: {today}
@@ -118,7 +125,7 @@ You are working inside a repository rooted at the workspace directory. You
 MAY use file tools and run development commands there. You must NEVER modify
 anything outside the workspace.
 
-{mode_section}
+{project_section}{mode_section}
 
 RESPONSE CONTRACT
 =================

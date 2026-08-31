@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "coding-agent"
-version = "0.2.0"
+version = "0.3.0"
 description = "A.S.C.S. — A Smart Coding System: a local autonomous coding agent backed by Ollama."
 readme = "README.md"
 requires-python = ">=3.12"

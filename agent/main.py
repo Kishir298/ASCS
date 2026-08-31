@@ -4,6 +4,7 @@ Subcommands/behaviors:
     risa [OPTIONS] [TASK]         run a one-shot agent session
     risa --ui [OPTIONS]           start the local web UI (http://127.0.0.1:8787)
     risa --check [OPTIONS]        verify Ollama connectivity + model availability
+    risa --doctor [OPTIONS]       run the full read-only diagnostic suite
     risa --list-models [OPTIONS]  list models installed on the Ollama server
 
 Modes: ``--mode plan|build|auto``. ``--safe`` keeps the legacy approval overlay
@@ -16,14 +17,14 @@ import argparse
 import sys
 
 from . import __version__
-from .config import MODES, AgentConfig, load_config
+from .config import DEFAULT_UI_HOST, DEFAULT_UI_PORT, MODES, AgentConfig, load_config
 from .loop import run_agent
 from .ollama import OllamaClient, OllamaError
 from .web import serve
 from .workspace import Workspace, WorkspaceError
 
-UI_DEFAULT_HOST = "127.0.0.1"
-UI_DEFAULT_PORT = 8787
+UI_DEFAULT_HOST = DEFAULT_UI_HOST
+UI_DEFAULT_PORT = DEFAULT_UI_PORT
 
 
 def _print_step(msg: str) -> None:
@@ -134,6 +135,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only verify Ollama connectivity/model availability, then exit.",
     )
     parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Run the full read-only diagnostic suite (environment, config, "
+        "workspace, Ollama, model, tools, context, git, tests), then exit.",
+    )
+    parser.add_argument(
         "--list-models",
         action="store_true",
         help="List models installed on the Ollama server, then exit.",
@@ -195,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_list_models(client)
     if args.check:
         return _cmd_check(client)
+    if args.doctor:
+        return _cmd_doctor(config)
 
     # -- web UI mode --------------------------------------------------------
     if args.ui:
@@ -320,6 +329,14 @@ def _cmd_check(client: OllamaClient) -> int:
     print(f"Model {client.model!r}: "
           f"{'available' if client.model in models else 'NOT INSTALLED'}")
     return 0
+
+
+def _cmd_doctor(config) -> int:
+    from .doctor import doctor, print_doctor
+
+    report = doctor(workspace=config.workspace)
+    print_doctor(report)
+    return 0 if report.ok else 1
 
 
 if __name__ == "__main__":

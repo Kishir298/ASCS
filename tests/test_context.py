@@ -211,6 +211,73 @@ def test_search_includes_direct_dependencies(project: Path) -> None:
     assert "services/calculator.py" in paths
 
 
+def test_dependents_finds_importers(project: Path) -> None:
+    index = ProjectIndex(project)
+    index.build()
+    dependents = index.dependents("services/calculator.py")
+    assert "main.py" in dependents
+
+
+def test_related_files_combines_dependencies_and_dependents(project: Path) -> None:
+    index = ProjectIndex(project)
+    index.build()
+    related = index.related_files("main.py")
+    assert "services/calculator.py" in related
+    related_for_calc = index.related_files("services/calculator.py")
+    assert "main.py" in related_for_calc
+
+
+def test_file_summary_includes_metadata(project: Path) -> None:
+    index = ProjectIndex(project)
+    index.build()
+    summary = index.file_summary("services/calculator.py")
+    assert "services/calculator.py" in summary
+    assert "python" in summary
+    assert "Calculator" in summary
+
+
+def test_file_summaries_render_all(project: Path) -> None:
+    index = ProjectIndex(project)
+    index.build()
+    summaries = index.file_summaries()
+    assert any("main.py" in s for s in summaries)
+    assert any("services/calculator.py" in s for s in summaries)
+
+
+def test_retrieve_level_2_returns_summaries(project: Path) -> None:
+    index = ProjectIndex(project)
+    index.build()
+    bundle = index.retrieve("calculator", level=2, max_tokens=1000, max_files=4)
+    assert bundle.chunks
+    assert all("summaries" == c.path or c.language == "" for c in bundle.chunks)
+    assert bundle.files  # the most relevant file paths
+
+
+def test_retrieve_level_3_annotates_language(project: Path) -> None:
+    index = ProjectIndex(project)
+    index.build()
+    bundle = index.retrieve("calculator", level=3, max_tokens=1000, max_files=4)
+    assert bundle.chunks
+    assert bundle.chunks[0].language in {"python", ""}
+
+
+def test_retrieve_level_4_includes_related_files(project: Path) -> None:
+    index = ProjectIndex(project)
+    index.build()
+    bundle = index.retrieve("main", level=4, max_tokens=1000, max_files=4)
+    related = {f for chunk in bundle.chunks for f in chunk.related_files}
+    assert "services/calculator.py" in related
+
+
+def test_retrieve_invalid_level_raises(project: Path) -> None:
+    index = ProjectIndex(project)
+    index.build()
+    with pytest.raises(ValueError):
+        index.retrieve("x", level=0)
+    with pytest.raises(ValueError):
+        index.retrieve("x", level=5)
+
+
 def test_chunks_respect_token_budget(project: Path) -> None:
     index = ProjectIndex(project)
     index.build()
@@ -431,6 +498,61 @@ def test_changed_file_is_reindexed(project: Path) -> None:
     }
 
     assert "changed" in names
+
+
+def test_update_indexes_new_file(project: Path) -> None:
+    index = ProjectIndex(project)
+    index.build()
+
+    assert "new_module.py" not in index.records
+
+    write_file(project, "new_module.py", "def hello():\n    return 'hi'\n")
+
+    index.update()
+
+    assert "new_module.py" in index.records
+    names = {s.name for s in index.records["new_module.py"].symbols}
+    assert "hello" in names
+
+
+def test_update_removes_deleted_file(project: Path) -> None:
+    index = ProjectIndex(project)
+    index.build()
+
+    assert "README.md" in index.records
+
+    (project / "README.md").unlink()
+
+    index.update()
+
+    assert "README.md" not in index.records
+
+
+def test_update_fast_path_keeps_unchanged_records(project: Path, monkeypatch) -> None:
+    index = ProjectIndex(project)
+    index.build()
+
+    original = index.records["main.py"].sha256
+    calls = {"index_file": 0}
+
+    original_index_file = index._index_file
+
+    def counting_index(path, relative):
+        calls["index_file"] += 1
+        return original_index_file(path, relative)
+
+    monkeypatch.setattr(index, "_index_file", counting_index)
+
+    index.update()
+
+    assert calls["index_file"] == 0
+    assert index.records["main.py"].sha256 == original
+
+    write_file(project, "main.py", "def touched():\n    return 1\n")
+    index.update()
+
+    assert calls["index_file"] == 1
+    assert index.records["main.py"].sha256 != original
 
 
 def test_create_project_index_builds_immediately(

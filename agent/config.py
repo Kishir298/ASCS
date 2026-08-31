@@ -37,15 +37,21 @@ DEFAULT_UI_PORT = 8787
 MODES = ("PLAN", "BUILD", "AUTO")
 
 # Tools that modify the workspace / run arbitrary commands. In PLAN mode these
-# are removed from the enabled set.
-PLAN_MODE_BLOCKED = {
-    "write_file",
-    "apply_patch",
-    "delete_file",
-    "move_file",
-    "copy_file",
-    "run_command",
-}
+# are removed from the enabled set; in SAFE mode they are gated behind
+# operator approval. This is the single source of truth for "modifying" tools.
+MODIFY_TOOLS = frozenset(
+    {
+        "write_file",
+        "apply_patch",
+        "delete_file",
+        "move_file",
+        "copy_file",
+        "run_command",
+    }
+)
+
+# Backward-compatible alias: PLAN mode disables the modifying tools.
+PLAN_MODE_BLOCKED = MODIFY_TOOLS
 
 # Tools the agent may use without operator approval even in SAFE mode.
 READONLY_TOOLS = {

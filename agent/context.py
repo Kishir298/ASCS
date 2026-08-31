@@ -128,6 +128,7 @@ class ContextChunk:
     estimated_tokens: int
     symbols: list[str] = field(default_factory=list)
     related_files: list[str] = field(default_factory=list)
+    language: str = ""
 
 
 @dataclass
@@ -348,9 +349,56 @@ class ProjectIndex:
         return self.records
 
     def update(self) -> dict[str, FileRecord]:
-        """Incrementally update changed files and remove deleted files."""
+        """Incrementally update the index from the current on-disk state.
 
-        return self.build()
+        Only changed, new, or deleted files are processed:
+
+        * new files are indexed,
+        * existing files whose size/mtime still match are kept as-is,
+        * deleted files are removed from the index.
+
+        This avoids a full re-parse of an unchanged project on every run.
+        Also re-resolves module dependencies (they may have shifted) and
+        persists the result.
+        """
+        seen: set[str] = set()
+        changed = False
+
+        for path in self.iter_files():
+            relative = self.relative_path(path)
+            seen.add(relative)
+            previous = self.records.get(relative)
+            if previous is None:
+                # New file: index it.
+                record = self._index_file(path, relative)
+                self.records[relative] = record
+                changed = True
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            if (
+                previous.size == stat.st_size
+                and previous.modified_ns == stat.st_mtime_ns
+            ):
+                continue  # fast path: unchanged
+            # Content may have changed -> re-index (hash re-verified inside).
+            record = self._index_file(path, relative)
+            self.records[relative] = record
+            changed = True
+
+        # Remove deleted files.
+        stale = set(self.records) - seen
+        for path in stale:
+            del self.records[path]
+            changed = True
+
+        if changed or stale:
+            self._resolve_dependencies()
+            self.save()
+
+        return self.records
 
     def _index_file(self, path: Path, relative: str) -> FileRecord:
         try:
@@ -983,6 +1031,152 @@ class ProjectIndex:
             estimated_tokens=used_tokens,
             files=sorted({chunk.path for chunk in chunks}),
         )
+
+    # ------------------------------------------------------------------
+    # Retrieval (hierarchical)
+    # ------------------------------------------------------------------
+
+    def file_summary(self, path: str | Path) -> str:
+        """Return a short, deterministic Level-2 summary of one file."""
+        relative = self.relative_path(path)
+        record = self.records.get(relative)
+        if record is None:
+            return f"{relative}: not indexed"
+        language = record.language or "text"
+        symbol_names = ", ".join(
+            f"{s.kind} {s.name}" for s in record.symbols[:12]
+        )
+        if record.symbols:
+            symbol_text = f"; symbols: {symbol_names}"
+        else:
+            symbol_text = ""
+        imports_text = (
+            f"; imports {len(record.imports)} module(s)"
+            if record.imports
+            else ""
+        )
+        return (
+            f"{relative} [{language}, {record.size} bytes, "
+            f"{len(record.symbols)} symbol(s)]{symbol_text}{imports_text}"
+        )
+
+    def file_summaries(self, limit: int = 200) -> list[str]:
+        """Level-2 directory/file summaries for understanding architecture."""
+        ordered = sorted(self.records.values(), key=lambda r: r.path)
+        return [self.file_summary(record.path) for record in ordered[:limit]]
+
+    def dependents(self, path: str | Path) -> list[str]:
+        """Files that import ``path`` (reverse dependency edges)."""
+        target = self.relative_path(path)
+        result: list[str] = []
+        for record in self.records.values():
+            if target in record.dependencies:
+                result.append(record.path)
+        return sorted(set(result))
+
+    def related_files(self, path: str | Path, *, limit: int = 20) -> list[str]:
+        """Dependency-aware related files for ``path``.
+
+        Returns the union of the file's own dependencies and its dependents
+        (importers), then any tests whose name matches the module, capped at
+        ``limit``.
+        """
+        relative = self.relative_path(path)
+        record = self.records.get(relative)
+        related: set[str] = set()
+        if record is not None:
+            related.update(record.dependencies)
+        related.update(self.dependents(relative))
+
+        # Tests targeting this module: tests/<module>_test.py or test_<module>.py
+        stem = Path(relative).stem
+        module_basename = Path(relative).name.split(".")[0]
+        for candidate in self.records:
+            candidate_name = Path(candidate).name.lower()
+            if candidate_name in {
+                f"test_{module_basename}.py",
+                f"{module_basename}_test.py",
+                f"test_{module_basename.lower()}.py",
+                f"{module_basename.lower()}_test.py",
+            } and not candidate.endswith(".pyc"):
+                related.add(candidate)
+            elif (
+                stem in candidate
+                and ("tests/" in candidate or candidate.startswith("test_"))
+            ):
+                related.add(candidate)
+
+        ordered = sorted(related, key=lambda p: (p != relative, p))
+        return ordered[:limit]
+
+    def retrieve(
+        self,
+        task: str,
+        *,
+        level: int = 3,
+        max_tokens: int = DEFAULT_CHUNK_TOKENS,
+        max_files: int = 8,
+    ) -> ContextBundle:
+        """Hierarchical retrieval for a task.
+
+        Levels select how much surrounding structure is included:
+
+        * ``level=1`` - project metadata only (callers should pair this with
+          :meth:`ProjectStore.refresh` to obtain the manifest).
+        * ``level=2`` - directory/file summaries of the most relevant files.
+        * ``level=3`` - relevant source files, chunked to budget (default).
+        * ``level=4`` - exact code regions + related (dependency/tests) files.
+        """
+        if level < 1 or level > 4:
+            raise ValueError("level must be in 1..4")
+
+        bundle = self.build_context(task, max_tokens=max_tokens, max_files=max_files)
+
+        if level == 1:
+            return ContextBundle(
+                task=task,
+                chunks=[],
+                estimated_tokens=0,
+                files=list(self._level1_files()),
+            )
+
+        if level == 2:
+            summaries = self.file_summaries(limit=max_files * 2)
+            return ContextBundle(
+                task=task,
+                chunks=[
+                    ContextChunk(
+                        chunk_id=self._chunk_id("summaries", idx, idx),
+                        path="<summaries>",
+                        start_line=0,
+                        end_line=0,
+                        text=summary,
+                        estimated_tokens=self.estimate_tokens(summary),
+                        language="",
+                    )
+                    for idx, summary in enumerate(summaries)
+                ],
+                estimated_tokens=sum(
+                    self.estimate_tokens(s) for s in summaries
+                ),
+                files=sorted({r.path for r in self.search(task, limit=max_files)}),
+            )
+
+        # level 3 or 4: annotate chunks with language + related files.
+        for chunk in bundle.chunks:
+            record = self.records.get(chunk.path)
+            if record is not None:
+                chunk.language = record.language
+                if level >= 4:
+                    chunk.related_files = (
+                        chunk.related_files or self.related_files(chunk.path)
+                    )
+
+        return bundle
+
+    def _level1_files(self) -> list[str]:
+        """Small always-available metadata list (used with level=1)."""
+        return ["(project manifest lives in .ascs/project_manifest.json)"]
 
     # ------------------------------------------------------------------
     # Utilities

@@ -112,14 +112,21 @@ def test_start_begins_fresh_run_after_terminal(tmp_path):
     assert snap.started_at > first_started
     assert snap.ended_at is None
     # Old run's transitions are gone; only the fresh RECEIVING entry remains.
-    assert snap.transitions == [(RECEIVING_TASK, snap.started_at)]
+    # The recorded transition timestamp and started_at are captured within the
+    # same lock but at different instants, so compare with a tolerance.
+    assert len(snap.transitions) == 1
+    assert snap.transitions[0][0] == RECEIVING_TASK
+    assert snap.transitions[0][1] == pytest.approx(snap.started_at, abs=1e-3)
     assert snap.state == RECEIVING_TASK
 
 
 def test_start_from_idle_counts_entry_transition():
     t = StateTracker(IDLE)
     t.start(RECEIVING_TASK)
-    assert t.snapshot.transitions == [(RECEIVING_TASK, t.snapshot.started_at)]
+    assert t.snapshot.transitions[0][0] == RECEIVING_TASK
+    assert t.snapshot.transitions[0][1] == pytest.approx(
+        t.snapshot.started_at, abs=1e-3
+    )
 
 
 def test_labels_are_upper_ascii():

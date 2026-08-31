@@ -40,6 +40,9 @@ The default model is `qwen2.5-coder:14b`. Override it per run with
 # One-shot autonomous run
 risa --auto "Add a --verbose flag to the CLI and test it"
 
+# Diagnostics (read-only PASS/WARN/FAIL report)
+risa --doctor
+
 # Plan first (read-only: inspect + record a plan, no edits)
 risa --mode plan "How should we split the config loader into modules?"
 
@@ -114,6 +117,57 @@ Hard guarantees:
 - `delete_file` refuses the root, directories, and VCS metadata
   (`.git`, `.github`, `.gitignore`).
 - PLAN mode disables all mutating tools; SAFE gates them behind approval.
+
+## Diagnostics (`risa doctor`)
+
+```
+risa --doctor [--workspace <path>]
+```
+
+Runs a read-only diagnostic suite and reports a `PASS` / `WARN` / `FAIL`
+status for each item, with actionable recovery hints:
+
+- Python environment and A.S.C.S. install
+- Configuration validity
+- Workspace existence and containment
+- Ollama connectivity and the configured model
+- Registered tools
+- Persistent context index health
+- Project manifest / discovery state
+- Git availability
+- pytest availability
+
+## Project intelligence
+
+A.S.C.S. treats the repository as a persistent project, not a sequence of
+one-off conversations. While working it builds and maintains:
+
+- **Project manifest** (`.ascs/project_manifest.json`) — languages,
+  frameworks, package managers, dependencies, entry points, tests, config and
+  documentation files, plus git state.
+- **Persistent file index** (`.ascs/context_index.json`) — per-file metadata,
+  symbols, imports and dependencies. Repeated sessions reuse the index; the
+  index is updated **incrementally** (only changed/new/deleted files are
+  re-processed).
+- **Hierarchical retrieval** for each task:
+  - Level 1: project metadata
+  - Level 2: directory/file summaries
+  - Level 3: relevant source files, chunked to a token budget
+  - Level 4: exact code regions plus dependency- and test-related files
+
+The agent receives a scan-derived "PROJECT INTELLIGENCE" block in its system
+prompt, so it starts every task knowing the project's shape instead of
+rediscovering it.
+
+## Task engine
+
+Plans and work items are structured as a dependency-aware **task graph**
+(`agent.tasks`) with explicit statuses
+(`pending → ready → running → completed / failed / blocked / cancelled /
+skipped`). Each task carries its own description, dependencies, files,
+commands, verification list, retry count and failure reason. Task graphs
+persist to `.ascs/task_state.json`, which is the foundation for resuming
+interrupted objectives rather than restarting them.
 
 ## Configuration
 

@@ -149,6 +149,68 @@ def test_safe_mode_approver_approves(tmp_path):
     assert (tmp_path / "x.py").exists()
 
 
+def test_safe_mode_approver_declines_run_command(tmp_path):
+    approver_calls = []
+
+    def approver(desc):
+        approver_calls.append(desc)
+        return False
+
+    loop, _ = make_loop(
+        tmp_path,
+        [
+            tool_call("run_command", {"command": "echo hi"}),
+            json.dumps({"done": True, "summary": "finished"}),
+        ],
+        config_overrides={"mode": "SAFE"},
+        approver=approver,
+    )
+    result = loop.run("task")
+    assert result.status == "completed"
+    assert "run_command" in " ".join(approver_calls)
+
+
+def test_safe_mode_approver_approves_apply_patch(tmp_path):
+    (tmp_path / "target.txt").write_text("old", encoding="utf-8")
+
+    def approver(desc):
+        return True
+
+    loop, _ = make_loop(
+        tmp_path,
+        [
+            tool_call(
+                "apply_patch",
+                {
+                    "path": "target.txt",
+                    "old_text": "old",
+                    "new_text": "new",
+                },
+            ),
+            json.dumps({"done": True, "summary": "patched"}),
+        ],
+        config_overrides={"mode": "SAFE"},
+        approver=approver,
+    )
+    result = loop.run("task")
+    assert result.status == "completed"
+    assert (tmp_path / "target.txt").read_text(encoding="utf-8") == "new"
+
+
+def test_plan_mode_rejects_modifying_tool_with_feedback(tmp_path):
+    loop, _ = make_loop(
+        tmp_path,
+        [
+            tool_call("write_file", {"path": "x.py", "content": "x=1"}),
+            json.dumps({"done": True, "summary": "plan only"}),
+        ],
+        config_overrides={"mode": "PLAN"},
+    )
+    result = loop.run("task")
+    assert result.status == "completed"
+    assert not (tmp_path / "x.py").exists()  # PLAN never writes
+
+
 def test_interrupt_returns_interrupted(tmp_path):
     loop, _ = make_loop(tmp_path, [KeyboardInterrupt()])
     result = loop.run("anything")

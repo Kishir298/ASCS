@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from agent.boot import boot, boot_error_message, print_boot
@@ -127,6 +129,36 @@ def test_boot_invalid_config(monkeypatch, tmp_path):
     report = boot(workspace_path=str(tmp_path), mode="BOGUS", prewarm=False)
     assert not report.ok
     assert report.error_phase == "config"
+
+
+def test_boot_python_too_old(monkeypatch, tmp_path):
+    _patch(monkeypatch)
+    import agent.boot as boot_mod
+
+    old = sys.version_info
+    try:
+        sys.version_info = (3, 11, 0)
+        report = boot_mod.boot(workspace_path=str(tmp_path), prewarm=False)
+        assert not report.ok
+        assert report.error_phase == "pyenv"
+        assert "3.12" in report.error
+    finally:
+        sys.version_info = old
+
+
+def test_boot_env_unwritable_workspace(monkeypatch, tmp_path):
+    _patch(monkeypatch)
+
+    def deny_write(*args, **kwargs):
+        raise OSError(13, "Permission denied")
+
+    import pathlib
+
+    monkeypatch.setattr(pathlib.Path, "write_text", deny_write)
+    report = boot(workspace_path=str(tmp_path), prewarm=False)
+    assert not report.ok
+    assert report.error_phase == "env"
+    assert "not writable" in report.error
 
 
 def test_boot_report_error_message_default():

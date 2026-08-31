@@ -10,3 +10,6 @@ build/
 # E2E scratch workspace, if ever created inside the repo
 .tmp_workspace/
 .aider*
+
+# A.S.C.S. runtime state (regenerated on run)
+.ascs/

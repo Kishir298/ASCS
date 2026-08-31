@@ -105,7 +105,16 @@ def boot(
 
     # 2. Python environment.
     run.begin("pyenv", f"Checking Python environment... (Python {platform.python_version()})")
-    run.detail("Python environment OK")
+    if sys.version_info < (3, 12):
+        out.ok = False
+        out.error = (
+            f"Python {platform.python_version()} is too old; A.S.C.S. requires "
+            f"Python 3.12 or newer (running {sys.executable}).\n"
+            "Recovery: install Python 3.12+ and restart A.S.C.S. with it."
+        )
+        out.error_phase = "pyenv"
+        return out
+    run.detail(f"Python {platform.python_version()} OK ({sys.executable})")
     run.end()
 
     # 3. Workspace.
@@ -195,10 +204,32 @@ def boot(
     run.detail(f"{len(TOOL_SPECS)} tools loaded")
     run.end()
 
-    # 8. Startup checks complete.
+    # 8. Environment: verify the workspace is writable (a real startup sanity
+    #    check) and that the test runner is importable.
     run.begin("env", "Running startup checks...")
-    run.detail("All startup checks complete")
-    run.end()
+    from pathlib import Path as _Path
+
+    ws_dir = _Path(cfg.workspace)
+    try:
+        probe = ws_dir / ".ascs_write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError as exc:
+        out.ok = False
+        out.error = (
+            f"Workspace is not writable: {cfg.workspace}: {exc}\n"
+            "Recovery: grant write permission to the workspace directory, then start again."
+        )
+        out.error_phase = "env"
+        return out
+    try:
+        import pytest  # noqa: F401
+    except ImportError:
+        run.detail("Writable workspace; pytest not installed (tests will be skipped)")
+        run.end()
+    else:
+        run.detail("Writable workspace; pytest available")
+        run.end()
 
     out.ok = True
     out.stages = stages

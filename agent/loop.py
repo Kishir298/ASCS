@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from . import state as _state
-from .config import AgentConfig
+from .config import AgentConfig, MODIFY_TOOLS
 from .events import (
     EventSink,
     emit_activity,
@@ -82,17 +82,6 @@ DEFAULT_APPROVER: Callable[[str], bool] = lambda desc: (
     input(f"[SAFE] Approve: {desc} [y/N] ").strip().lower() in ("y", "yes")
 )
 
-# Tools that change the workspace or run commands; gated in SAFE mode and
-# disabled entirely in PLAN mode.
-MODIFY_TOOLS = {
-    "write_file",
-    "apply_patch",
-    "delete_file",
-    "move_file",
-    "copy_file",
-    "run_command",
-}
-
 FILE_EVENT_FOR_TOOL = {
     "read_file": "file_read",
     "write_file": "file_written",
@@ -128,17 +117,6 @@ def _content(message: dict[str, str]) -> str:
 def is_test_command(command: str) -> bool:
     """True when ``command`` looks like it runs the test suite."""
     return bool(_TEST_COMMAND_RE.search(command or ""))
-
-
-def _state_for(status: str) -> str:
-    """Map a LoopResult status onto a lifecycle state."""
-    if status == "completed":
-        return _state.COMPLETE
-    if status in ("interrupted", "cancelled"):
-        return _state.CANCELLED
-    if status == "max_iterations":
-        return _state.TIMEOUT
-    return _state.FAILED  # fatal | malformed
 
 
 @dataclass
@@ -220,9 +198,27 @@ class AgentLoop:
 
     # -- main entry ---------------------------------------------------------
 
+    def _project_prompt_block(self) -> str:
+        """Build the project-intelligence block for the system prompt.
+
+        Best-effort: if project discovery fails, the agent still runs with a
+        generic prompt rather than being blocked by an indexing error.
+        """
+        try:
+            from .project import ProjectStore, project_prompt_text
+
+            store = ProjectStore(self.ws.root)
+            store.refresh()
+            return project_prompt_text(store)
+        except Exception as exc:  # noqa: BLE001 - discovery must never block the agent
+            return f"- Project discovery unavailable: {exc}"
+
     def run(self, task: str) -> LoopResult:
         self._messages = [
-            {"role": "system", "content": system_prompt(self.config)},
+            {
+                "role": "system",
+                "content": system_prompt(self.config, self._project_prompt_block()),
+            },
             task_message(task),
         ]
         self.tracker.configure(mode=self.config.mode, task=task)

@@ -15,11 +15,16 @@ Primary components:
     state       - explicit lifecycle state machine
     boot        - staged startup with real checks and progress reporting
     web         - local web UI server (stdlib only, SSE, cancellation)
+    context     - persistent project index + hierarchical, dependency-aware
+                  retrieval with deterministic chunking
+    project     - project scanner + manifest + persistent project store
+    tasks       - structured task graph (statuses, dependencies, persistence)
+    doctor      - read-only diagnostics (``risa --doctor``)
     main        - CLI entry point (``risa``)
 """
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = ["__version__"]
