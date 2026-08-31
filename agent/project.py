@@ -162,6 +162,7 @@ class ProjectManifest:
     git: dict = field(default_factory=dict)  # {"repository": bool, "branch": str}
     indexed: bool = False
     index_version: int = 0
+    toolchain: str = ""  # rendered detect_toolchain() summary
     updated_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict:
@@ -384,6 +385,9 @@ def scan(
     result = scanner.scan()
     name = Path(root).resolve().name or "project"
     git = _git_info(Path(root).resolve())
+    from .toolchain import detect_toolchain, toolchain_to_text
+
+    toolchain = detect_toolchain(Path(root).resolve())
     return ProjectManifest(
         root=str(Path(root).resolve()),
         name=name,
@@ -398,6 +402,7 @@ def scan(
         important_dirs=result.important_dirs,
         git=git,
         indexed=False,
+        toolchain=toolchain_to_text(toolchain),
         updated_at=time.time(),
     )
 
@@ -567,6 +572,8 @@ def project_prompt_text(store: ProjectStore, *, max_lines: int = 25) -> str:
     lines.append(f"- Project: {manifest.name}")
     if manifest.languages:
         lines.append(f"- Languages: {', '.join(manifest.languages[:8])}")
+    if manifest.toolchain:
+        lines.append(f"- Toolchain: {manifest.toolchain}")
     if manifest.frameworks:
         lines.append(f"- Frameworks: {', '.join(manifest.frameworks[:8])}")
     if manifest.package_managers:

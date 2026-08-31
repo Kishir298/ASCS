@@ -310,6 +310,51 @@ class OllamaClient:
             raise OllamaResponseError("Ollama returned an empty assistant response")
         return content
 
+    def chat_resilient(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        format: str | None = "json",
+        options: dict[str, Any] | None = None,
+        timeout: int | None = None,
+        max_retries: int = 2,
+        backoff_s: float = 2.0,
+        should_stop: Any = None,
+    ) -> str:
+        """Call :meth:`chat`, retrying transient failures with backoff.
+
+        A local Ollama server can drop a connection while (re)loading a large
+        model (e.g. ``qwen3:14b``) or return a transient 5xx under load. These
+        are *retryable*; a missing model or an unparseable response is not.
+        Retries are bounded and respect ``should_stop`` so the operator can
+        cancel.
+
+        Returns the assistant content on success; raises the last error when
+        retries are exhausted or the failure is non-transient.
+        """
+        import time
+
+        attempt = 0
+        last_exc: OllamaError | None = None
+        while True:
+            try:
+                return self.chat(
+                    messages, format=format, options=options, timeout=timeout
+                )
+            except (OllamaConnectionError, OllamaTimeoutError) as exc:
+                last_exc = exc
+            except OllamaHTTPError as exc:
+                # Retry only transient server errors (5xx), never 4xx.
+                if not exc.status or exc.status < 500:
+                    raise
+                last_exc = exc
+            if attempt >= max_retries:
+                raise last_exc
+            attempt += 1
+            if should_stop is not None and should_stop():
+                raise last_exc
+            time.sleep(backoff_s * attempt)
+
     def chat_stream(
         self,
         messages: list[dict[str, str]],

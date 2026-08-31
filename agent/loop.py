@@ -143,6 +143,21 @@ def _chat_value(text: str):
     return raw
 
 
+def _resilient_chat(client, messages: list[dict[str, str]], **kwargs) -> str:
+    """Issue a chat request, using the resilient (retrying) path when available.
+
+    Real :class:`~agent.ollama.OllamaClient` instances provide
+    ``chat_resilient`` (bounded retry on transient connection/5xx errors);
+    test fakes fall back to their plain ``chat`` (which does not accept the
+    ``should_stop`` retry hook, so that kwarg is stripped).
+    """
+    if hasattr(client, "chat_resilient"):
+        return client.chat_resilient(messages, **kwargs)
+    chat = getattr(client, "chat")
+    kwargs.pop("should_stop", None)
+    return chat(messages, **kwargs)
+
+
 @dataclass
 class LoopResult:
     status: str = "interrupted"  # completed|max_iterations|interrupted|cancelled|fatal|malformed
@@ -171,6 +186,7 @@ class GraphLoopResult:
     task_count: int = 0
     progress: dict = field(default_factory=dict)
     error: str = ""
+    report: str = ""  # truthful end-of-run report
 
     @property
     def is_complete(self) -> bool:
@@ -298,8 +314,11 @@ class AgentLoop:
                     emit_model_started(
                         self.event_sink, "Model is thinking/generating..."
                     )
-                    reply_text = self.client.chat(
-                        self._messages_for_request(), format="json"
+                    reply_text = _resilient_chat(
+                        self.client,
+                        self._messages_for_request(),
+                        format="json",
+                        should_stop=self.should_stop,
                     )
                     emit_model_completed(
                         self.event_sink,
@@ -533,6 +552,7 @@ class AgentLoop:
             result.summary = execution.summary
             result.iterations = execution.iterations
             result.progress = execution.progress
+            result.report = execution.report()
             result.steps = list(self._steps)
             if execution.status in ("completed", "partial") and execution.failed_tasks:
                 result.status = "partial"
@@ -572,8 +592,11 @@ class AgentLoop:
         from .planner import planner_prompt
 
         prompt = planner_prompt(objective, intelligence)
-        raw = self.client.chat(
-            [{"role": "user", "content": prompt}], format="json"
+        raw = _resilient_chat(
+            self.client,
+            [{"role": "user", "content": prompt}],
+            format="json",
+            should_stop=self.should_stop,
         )
         from .planner import parse_tasks
 
@@ -590,21 +613,38 @@ class AgentLoop:
             ]
         from .tasks import build_graph_from_specs, chunk_graph
 
-        graph = build_graph_from_specs(specs)
-        if any(t.complexity == "large" for t in graph.tasks.values()):
-            graph = chunk_graph(graph)
-        # Guarantee verification on every task via planner heuristics.
-        from .planner import _derive_verification
+        try:
+            graph = build_graph_from_specs(specs)
+            if any(t.complexity == "large" for t in graph.tasks.values()):
+                graph = chunk_graph(graph)
+            # Guarantee verification on every task via planner heuristics.
+            from .planner import _derive_verification
 
-        for task in graph.tasks.values():
-            if not task.verification:
-                task.verification = _derive_verification(
-                    {"title": task.title, "description": task.description,
-                     "kind": task.kind, "files": task.files},
-                    intelligence,
-                )
-        graph.recompute_statuses()
-        graph.validate()
+            for task in graph.tasks.values():
+                if not task.verification:
+                    task.verification = _derive_verification(
+                        {"title": task.title, "description": task.description,
+                         "kind": task.kind, "files": task.files},
+                        intelligence,
+                    )
+            graph.recompute_statuses()
+            graph.validate()
+        except Exception as exc:  # noqa: BLE001 - recover from a malformed plan
+            # The model produced an invalid dependency graph (unknown task ref
+            # or a cycle). Fall back to a single, honest review-style task so
+            # execution still proceeds instead of hard-failing the whole run.
+            self._step(f"[planner] malformed task graph, falling back: {exc}")
+            graph = build_graph_from_specs(
+                [
+                    {
+                        "id": "task-1",
+                        "title": f"Implement and verify: {objective}",
+                        "description": objective,
+                        "kind": "implement",
+                        "verification": ["verify the requested changes behave as intended"],
+                    }
+                ]
+            )
         return {"graph": graph, "text": plan_text(graph), "count": len(graph)}
 
     def _build_executor(self, store) -> TaskExecutor:

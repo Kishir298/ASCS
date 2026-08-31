@@ -14,6 +14,7 @@ from agent.ollama import (
     OllamaHTTPError,
     OllamaModelNotFoundError,
     OllamaResponseError,
+    OllamaTimeoutError,
 )
 
 
@@ -269,3 +270,79 @@ def test_untrack_ignores_other_response():
     assert client._active is a
     client._untrack(a)
     assert client._active is None
+
+
+# ── chat_resilient: bounded retry on transient failures ─────────────────────
+
+class _FlakyChat(OllamaClient):
+    """A client whose ``chat`` raises transient errors N times then succeeds."""
+
+    def __init__(self, fail_kind, fails_before_success, model="fake"):
+        super().__init__(base_url="http://127.0.0.1:1", model=model)
+        self.fail_kind = fail_kind
+        self.fails_before_success = fails_before_success
+        self.calls = 0
+
+    def chat(self, messages, *, format="json", options=None, timeout=None):
+        self.calls += 1
+        if self.calls <= self.fails_before_success:
+            if self.fail_kind == "conn":
+                raise OllamaConnectionError("cannot reach")
+            if self.fail_kind == "timeout":
+                raise OllamaTimeoutError("timed out")
+            if self.fail_kind == "http500":
+                raise OllamaHTTPError(500, "server error")
+            if self.fail_kind == "http404":
+                raise OllamaHTTPError(404, "not found")
+        return '{"done": true, "summary": "ok"}'
+
+
+def test_chat_resilient_recovers_after_connection_errors():
+    client = _FlakyChat("conn", fails_before_success=2)
+    out = client.chat_resilient([{"role": "user", "content": "hi"}], max_retries=2, backoff_s=0)
+    assert out == '{"done": true, "summary": "ok"}'
+    assert client.calls == 3
+
+
+def test_chat_resilient_recovers_after_http500():
+    client = _FlakyChat("http500", fails_before_success=1)
+    out = client.chat_resilient([{"role": "user", "content": "hi"}], max_retries=2, backoff_s=0)
+    assert client.calls == 2
+    assert "done" in out
+
+
+def test_chat_resilient_raises_when_retries_exhausted():
+    client = _FlakyChat("conn", fails_before_success=99)
+    with pytest.raises(OllamaConnectionError):
+        client.chat_resilient([{"role": "user", "content": "hi"}], max_retries=2, backoff_s=0)
+    # 1 initial + 2 retries
+    assert client.calls == 3
+
+
+def test_chat_resilient_does_not_retry_non_transient_http404():
+    client = _FlakyChat("http404", fails_before_success=99)
+    with pytest.raises(OllamaHTTPError) as exc:
+        client.chat_resilient([{"role": "user", "content": "hi"}], max_retries=2, backoff_s=0)
+    assert exc.value.status == 404
+    assert client.calls == 1  # no retry for 4xx
+
+
+def test_chat_resilient_respects_should_stop():
+    client = _FlakyChat("conn", fails_before_success=99)
+    with pytest.raises(OllamaConnectionError):
+        client.chat_resilient(
+            [{"role": "user", "content": "hi"}],
+            max_retries=5, backoff_s=0,
+            should_stop=lambda: True,
+        )
+    assert client.calls == 1  # stopped before retrying
+
+
+def test_chat_resilient_fallback_for_plain_chat_clients():
+    """Clients without chat_resilient still work through loop/executor helper."""
+    client = _FlakyChat("conn", fails_before_success=0)
+    from agent.loop import _resilient_chat
+
+    out = _resilient_chat(client, [{"role": "user", "content": "hi"}], format="json")
+    assert out == '{"done": true, "summary": "ok"}'
+

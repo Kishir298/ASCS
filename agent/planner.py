@@ -164,8 +164,10 @@ def parse_tasks(value: Any) -> list[dict]:
 def _derive_verification(task: dict, project_manifest_text: str) -> list[str]:
     """Fill a gap in verification with deterministic heuristics.
 
-    Falls back to a pytest run when the task clearly involves code and ``tests``
-    are known to the project, otherwise to a generic "inspect + report" step.
+    Falls back to a toolchain-derived test command when the task clearly
+    involves code and the project toolchain is known, otherwise to a generic
+    "inspect + report" step. The heuristic never fabricates a passing run: it
+    only emits a command that the toolchain detection actually identified.
     """
     if task.get("verification"):
         return list(task["verification"])
@@ -175,12 +177,33 @@ def _derive_verification(task: dict, project_manifest_text: str) -> list[str]:
     has_code = bool(task.get("files")) or task.get("kind") in ("implement", "review")
 
     if has_code:
-        if "pytest" in project_manifest_text.lower() or "tests" in project_manifest_text.lower():
-            verification.append("run pytest")
+        # Prefer a real toolchain-derived test command when one was detected.
+        test_cmd = _first_test_command(project_manifest_text)
+        if test_cmd:
+            verification.append(f"run {test_cmd}")
         verification.append("verify the changed files behave as intended")
     else:
         verification.append("report inspection findings and confirm nothing changed")
     return verification
+
+
+def _first_test_command(project_manifest_text: str) -> str:
+    """Pull the first likely test command out of a toolchain summary line."""
+    marker = "Toolchain:"
+    idx = project_manifest_text.find(marker)
+    if idx < 0:
+        return ""
+    # Locate the "Likely test commands: <semis>" fragment on the same block.
+    head = project_manifest_text[idx:]
+    for label in ("Likely test commands:", "Test commands:"):
+        start = head.find(label)
+        if start < 0:
+            continue
+        rest = head[start + len(label):]
+        first = rest.split(";")[0].strip()
+        if first and not first.startswith("Likely"):
+            return first
+    return ""
 
 
 def planner_prompt(

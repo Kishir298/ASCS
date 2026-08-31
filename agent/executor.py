@@ -104,6 +104,68 @@ class TaskExecution:
     def completed_tasks(self) -> list[TaskOutcome]:
         return [o for o in self.outcomes if o.ok]
 
+    @property
+    def cancelled_count(self) -> int:
+        return self.progress.get("cancelled", 0) + self.progress.get("skipped", 0)
+
+    def files_changed(self) -> list[str]:
+        """Files actually modified across all task action logs (deterministic)."""
+        modifying = {
+            "write_file", "edit_file", "apply_patch", "apply_diff",
+            "delete_file", "move_file", "copy_file",
+        }
+        seen: dict[str, str] = {}
+        for outcome in self.outcomes:
+            if not outcome.ok:
+                continue
+            for entry in outcome.action_log:
+                if not entry.ok or entry.action not in modifying:
+                    continue
+                target = entry.target.strip()
+                if target:
+                    seen[target] = target
+        return sorted(seen)
+
+    def total_retries(self) -> int:
+        """Number of verification retry attempts actually performed."""
+        return sum(
+            1
+            for outcome in self.outcomes
+            for entry in outcome.action_log
+            if entry.action == "verify" and not entry.ok
+        ) if self.outcomes else 0
+
+    def report(self) -> str:
+        """A truthful, human-readable end-of-run report."""
+        lines: list[str] = []
+        lines.append(f"Objective: {self.objective}")
+        lines.append(f"Status: {self.status}")
+        lines.append(f"Tasks planned: {self.progress.get('total', 0)}")
+        lines.append(f"Tasks completed: {self.progress.get('completed', 0)}")
+        lines.append(f"Tasks failed: {self.progress.get('failed', 0)}")
+        lines.append(f"Tasks cancelled/skipped: {self.cancelled_count}")
+        changed = self.files_changed()
+        if changed:
+            lines.append("Files changed:")
+            for path in changed:
+                lines.append(f"  - {path}")
+        else:
+            lines.append("Files changed: (none recorded)")
+        verified = sum(1 for o in self.outcomes if o.ok and o.verification)
+        lines.append(f"Verification performed: {verified} task(s)")
+        lines.append(f"Verification retries: {self.total_retries()}")
+        if self.failed_tasks:
+            lines.append("Remaining issues:")
+            for outcome in self.failed_tasks:
+                lines.append(f"  - {outcome.task_id}: {outcome.reason or outcome.summary}")
+        if self.summary:
+            lines.append(f"Summary: {self.summary}")
+        lines.append(
+            "Achieved: "
+            + ("yes" if self.status == "completed" else "no (incomplete or failed)")
+        )
+        return "\n".join(lines)
+
 
 def task_system_prompt(
     task: Task,
@@ -227,6 +289,9 @@ class TaskExecutor:
                 outcome = self._execute_one(graph, task)
                 execution.outcomes.append(outcome)
                 self.persist(graph)
+                # Refresh project context (index + manifest) so later tasks
+                # retrieve freshly-modified files rather than stale records.
+                self._refresh_context()
                 if not outcome.ok:
                     # _execute_one already marked the task FAILED; cancel
                     # dependents that can no longer proceed and stop.
@@ -377,6 +442,20 @@ class TaskExecutor:
             except Exception as exc:  # noqa: BLE001 - persistence must not crash
                 self.log(f"[executor] could not persist task state: {exc}")
 
+    def _refresh_context(self) -> None:
+        """Re-scan the project index so retrieval reflects post-task changes.
+
+        Called after every task so later tasks in the same run see updated
+        file content/dependencies. Best-effort: failures are surfaced to the
+        log but never crash the run.
+        """
+        if self.store is None:
+            return
+        try:
+            self.store.index.update()
+        except Exception as exc:  # noqa: BLE001 - context refresh must not crash
+            self.log(f"[executor] could not refresh project context: {exc}")
+
     # -- mode gating -------------------------------------------------------
 
     def _requires_approval(self, tool: str) -> bool:
@@ -484,20 +563,25 @@ class TaskExecutor:
             {"role": "user", "content": user_msg},
         ]
         outcome = TaskOutcome(task_id=task.id)
+        action_log: list[TaskActionLog] = []
 
         for iteration in range(1, self.config.max_iterations + 1):
             if self.should_stop():
                 outcome.ok = False
                 outcome.reason = "cancelled by operator"
+                outcome.action_log = action_log
                 return outcome
             try:
-                reply_text = self.client.chat(
+                reply_text = _resilient_chat(
+                    self.client,
                     _trim_for_request(messages, self.config.context_budget_chars),
                     format="json",
+                    should_stop=self.should_stop,
                 )
             except OllamaError as exc:
                 outcome.ok = False
                 outcome.reason = f"model error: {exc}"
+                outcome.action_log = action_log
                 return outcome
 
             reply = parse_model_reply(reply_text)
@@ -510,10 +594,19 @@ class TaskExecutor:
                 outcome.summary = reply.summary
                 outcome.iterations = iteration
                 outcome.ok = True
+                outcome.action_log = action_log
                 return outcome
 
             result = self._run_tool(reply.tool, reply.arguments, task, iteration)
             outcome.iterations = iteration
+            # Record the action for the per-task action log (files/commands).
+            _target = _action_target(reply.tool, reply.arguments)
+            action_log.append(TaskActionLog(
+                action=reply.tool,
+                target=_target,
+                output=result.note or ("" if result.ok else result.output[:200]),
+                ok=result.ok,
+            ))
             messages.append({"role": "assistant", "content": reply_text})
             messages.append(tool_result_message(result))
 
@@ -521,6 +614,7 @@ class TaskExecutor:
         outcome.reason = (
             f"Task exceeded {self.config.max_iterations} iterations without finishing"
         )
+        outcome.action_log = action_log
         return outcome
 
     def _run_tool(
@@ -661,6 +755,26 @@ def _trim_for_request(messages: list[dict[str, str]], budget: int) -> list[dict[
         removed = out.pop(2)
         total -= len(removed.get("content", ""))
     return out
+
+
+def _action_target(tool: str, arguments: dict[str, Any]) -> str:
+    """Best-effort target path/command for an action-log entry."""
+    if tool == "run_command":
+        return str(arguments.get("command", ""))
+    for key in ("path", "destination", "files"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return "<no target>"
+
+
+def _resilient_chat(client, messages: list[dict[str, str]], **kwargs) -> str:
+    """Issue a chat request, using the resilient (retrying) path when available."""
+    if hasattr(client, "chat_resilient"):
+        return client.chat_resilient(messages, **kwargs)
+    chat = getattr(client, "chat")
+    kwargs.pop("should_stop", None)
+    return chat(messages, **kwargs)
 
 
 __all__ = [

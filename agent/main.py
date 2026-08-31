@@ -273,6 +273,9 @@ def main(argv: list[str] | None = None) -> int:
     if plan:
         print("Plan:")
         print(plan)
+    if getattr(result, "report", ""):
+        print("\nReport:")
+        print(result.report)
     if getattr(result, "iterations", None):
         print(f"Iterations: {result.iterations}")
     elif isinstance(getattr(result, "task_count", None), int) and result.task_count:
