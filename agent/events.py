@@ -42,6 +42,8 @@ EVENT_TYPES = (
     "status",
     "task_plan",
     "task_started",
+    "task_verified",
+    "task_failed",
     "task_completed",
 )
 
@@ -382,5 +384,43 @@ def emit_task_completed(
             ok=ok,
             summary=summary or "",
             message=f"Task {task_id} {'completed' if ok else 'failed'}",
+        ),
+    )
+
+
+def emit_task_verified(
+    sink: EventSink | None,
+    task_id: str,
+    *,
+    ok: bool,
+    summary: str = "",
+) -> None:
+    """Emit a per-task verification result (quality-gate outcome)."""
+    _emit(
+        sink,
+        AgentEvent(
+            type="task_verified",
+            status=task_id,
+            ok=ok,
+            message=f"Task {task_id} verify {'passed' if ok else 'failed'}",
+            summary=summary or "",
+        ),
+    )
+
+
+def emit_task_failed(
+    sink: EventSink | None,
+    task_id: str,
+    reason: str,
+) -> None:
+    """Emit a per-task failure (model failure or failed verification)."""
+    _emit(
+        sink,
+        AgentEvent(
+            type="task_failed",
+            status=task_id,
+            ok=False,
+            message=f"Task {task_id} failed: {reason}",
+            error=reason,
         ),
     )

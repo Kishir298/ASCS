@@ -511,9 +511,22 @@ class AgentLoop:
                 persisted = store.load_task_graph()
                 if persisted and len(persisted) and not persisted.all_complete:
                     target = persisted
+                    from .executor import TaskExecutor as _TE
+
+                    reset = _TE.reset_stuck_tasks(target)
+                    if reset:
+                        self._step(
+                            f"Reset stuck RUNNING task(s) for resume: "
+                            f"{', '.join(reset)}"
+                        )
                     self._step("Resuming an in-progress task graph from .ascs/task_state.json")
 
             executor = self._build_executor(store)
+            if executor.git_baseline:
+                self._step(
+                    f"Git dirty baseline ({len(executor.git_baseline)} file(s)): "
+                    f"{', '.join(sorted(executor.git_baseline)[:10])}"
+                )
             execution: TaskExecution = executor.execute(objective, target)
 
             result.status = execution.status
@@ -595,6 +608,19 @@ class AgentLoop:
         return {"graph": graph, "text": plan_text(graph), "count": len(graph)}
 
     def _build_executor(self, store) -> TaskExecutor:
+        """Build a TaskExecutor with SAFE/PLAN mode gating wired in."""
+        from .context import git_status as _git_status
+
+        # Capture a dirty baseline before execution begins (Phase 4.4).
+        dirty_raw = _git_status(self.ws.root)
+        git_baseline: set[str] = set()
+        for line in dirty_raw.splitlines():
+            parts = line.split(maxsplit=1)
+            if len(parts) == 2:
+                path = parts[1].strip()
+                if path and not path.startswith(".ascs"):
+                    git_baseline.add(path)
+
         def wired_run(executor, task):
             emit_task_started(self.event_sink, task.id, task.title)
             outcome = executor._default_run_task(executor, task)
@@ -612,6 +638,8 @@ class AgentLoop:
             log=self.log,
             should_stop=self.should_stop,
             run_task=wired_run,
+            approver=self.approver,
+            git_baseline=git_baseline,
         )
 
     # -- internals ----------------------------------------------------------

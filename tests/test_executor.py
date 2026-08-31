@@ -185,10 +185,19 @@ def test_verify_task_fails_on_nonzero_exit(tmp_path):
     assert verification.steps[0]["status"] == "failed"
 
 
-def test_verify_task_with_no_steps_passes(tmp_path):
+def test_verify_task_with_no_steps_passes_for_non_implementing(tmp_path):
     executor = _make(tmp_path, started=_ok, store=False)
-    verification = executor.verify(executor, Task(id="T1", title="X"))
+    # inspect/review tasks pass with no verification steps.
+    verification = executor.verify(executor, Task(id="T1", title="X", kind="inspect"))
     assert verification.ok
+
+
+def test_verify_task_with_no_steps_fails_for_implementing(tmp_path):
+    executor = _make(tmp_path, started=_ok, store=False)
+    # implementing tasks require explicit verification steps.
+    verification = executor.verify(executor, Task(id="T1", title="X"))
+    assert not verification.ok
+    assert "no verification steps" in verification.detail
 
 
 # -- default model loop ----------------------------------------------------

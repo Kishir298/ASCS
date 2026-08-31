@@ -102,11 +102,13 @@ for future ASIS/TIVISS integrations:
 `activity`, `tool_started`, `tool_completed`, `file_read`, `file_written`,
 `patch_applied`, `command_started`, `command_output`, `command_completed`,
 `test_started`, `test_completed`, `agent_error`, `agent_stopped`,
-`agent_completed`, `task_plan`, `task_started`, `task_completed`.
+`agent_completed`, `task_plan`, `task_started`, `task_verified`, `task_failed`,
+`task_completed`.
 
 The task-engine run additionally emits `task_plan` (the rendered plan for
 operator inspection), `task_started` / `task_completed` for each task that runs,
-and a human-readable step log (`task_started`/`task_completed` carry the task id
+`task_verified` / `task_failed` at the verification quality gate, and a
+human-readable step log (`task_started`/`task_completed` carry the task id
 in `status`).
 
 `command_output` carries the truncated stdout/stderr text of a
@@ -126,6 +128,9 @@ Hard guarantees:
 - `delete_file` refuses the root, directories, and VCS metadata
   (`.git`, `.github`, `.gitignore`).
 - PLAN mode disables all mutating tools; SAFE gates them behind approval.
+- **Git dirty-state guard** (BUILD/AUTO): files with pre-existing uncommitted
+  changes at run start are protected — ASCS will not overwrite existing user
+  work without explicit approval.
 
 ## Diagnostics (`risa doctor`)
 
@@ -191,11 +196,29 @@ The engine is fully implemented and reachable via `risa --tasks "…"`:
 2. **Execute** (`agent.executor`) — `agent/executor.py` walks the graph, runs
    each ready task with a **task-scoped system prompt**, then verifies it
    against its acceptance criteria (each `run …` verification step must exit 0)
-   before marking it complete. A failing task cancels its dependents.
-3. **Inspect & resume** — progress is persisted to `.ascs/task_state.json`
-   after every task; a run can be resumed from that state. The plan and each
-   task are surfaced through `task_plan` / `task_started` / `task_completed`
-   events plus a human-readable step log.
+   before marking it complete. Implementing tasks with no declared verification
+   steps are treated as **not fully verified** (not silently passing). A
+   verification failure is fed back to the model for a bounded retry
+   (`max_verify_retries=2`, configurable via `AGENT_MAX_VERIFY_RETRIES`);
+   retries exhausted → task `FAILED`, dependents cascade-cancelled.
+3. **Mode gating** — the task engine respects PLAN/BUILD/SAFE modes:
+   - **PLAN**: read-only tools only (no file writes, no `run_command`, no
+     verification commands). The planner still produces and renders the task
+     graph/plan.
+   - **BUILD/AUTO**: full modification allowed. **Git dirty-state guard**:
+     files dirty at run start are protected; writes to pre-existing dirty
+     files are blocked with a clear "protected" message.
+   - **SAFE**: every modifying tool and verification command requires operator
+     approval before execution.
+4. **Per-task action log** — each task records a structured log of every
+   tool/command it ran, files affected, and verification result, surfaced
+   through the step log and events for human and machine readability.
+5. **Inspect & resume** — progress is persisted to `.ascs/task_state.json`
+   after every task; a run can be resumed from that state. A task stuck in
+   `RUNNING` by an interrupted run is automatically reset to `READY` so resume
+   can retry it without restarting completed work. The plan and each task are
+   surfaced through `task_plan` / `task_started` / `task_verified` /
+   `task_failed` / `task_completed` events plus a human-readable step log.
 
 The classic single-shot loop (`risa "…"`, no `--tasks`) remains the default
 mode and is unchanged.
@@ -220,6 +243,7 @@ Environment variables (CLI flags win, both override defaults):
 | `AGENT_MAX_OUTPUT_CHARS` | per-tool-output truncation limit     | `20000`               |
 | `AGENT_CONTEXT_BUDGET_CHARS` | rolling conversation budget      | `70000`               |
 | `AGENT_MALFORMED_RETRY_LIMIT` | bad-reply retries before `FAILED` | `5`               |
+| `AGENT_MAX_VERIFY_RETRIES` | verification failure retries per task | `2`           |
 
 ## Development
 
@@ -232,4 +256,5 @@ Test suite covers the tool layer, the loop's lifecycle/plan/mode/cancellation
 behaviour (using scripted fake clients — no Ollama required), event emission,
 the Ollama HTTP client against an in-process mock server, the state machine,
 the staged boot, the web server endpoints, and the task engine (planner,
-executor, and task-graph DAG behaviour).
+executor, task-graph DAG behaviour, mode gating, git-dirty protection,
+verification retry, interrupt+resume, and end-to-end pipeline integration).

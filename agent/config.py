@@ -82,6 +82,7 @@ class AgentConfig:
     prewarm: bool = True  # warm the model before the first real step
     max_output_chars: int = 20_000  # per-tool-output truncation limit
     context_budget_chars: int = 70_000  # rolling history budget
+    max_verify_retries: int = 2  # verification failure retries per task
     malformed_retry_limit: int = 5
     ui_host: str = DEFAULT_UI_HOST
     ui_port: int = DEFAULT_UI_PORT
@@ -199,6 +200,7 @@ def load_config(**overrides) -> AgentConfig:
         "max_output_chars": _env_int("AGENT_MAX_OUTPUT_CHARS", 20_000),
         "context_budget_chars": _env_int("AGENT_CONTEXT_BUDGET_CHARS", 70_000),
         "malformed_retry_limit": _env_int("AGENT_MALFORMED_RETRY_LIMIT", 5),
+        "max_verify_retries": _env_int("AGENT_MAX_VERIFY_RETRIES", 2),
         "ui_host": _env_str("AGENT_UI_HOST", DEFAULT_UI_HOST),
         "ui_port": _env_int("AGENT_UI_PORT", DEFAULT_UI_PORT),
     }

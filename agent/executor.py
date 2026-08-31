@@ -25,19 +25,21 @@ import time as _time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .config import AgentConfig
+from .config import AgentConfig, MODIFY_TOOLS, READONLY_TOOLS
 from .events import (
     EventSink,
     emit_activity,
     emit_command_completed,
     emit_command_started,
     emit_status,
+    emit_task_failed,
+    emit_task_verified,
     null_sink,
 )
 from .models import ToolResult, parse_model_reply, tool_result_message
 from .ollama import OllamaClient, OllamaError
 from .prompts import system_prompt
-from .tasks import COMPLETED, FAILED, RUNNING, SKIPPED, Task, TaskGraph
+from .tasks import COMPLETED, FAILED, PENDING, READY, RUNNING, SKIPPED, Task, TaskGraph
 from .tools import execute_tool
 from .workspace import Workspace
 
@@ -57,15 +59,26 @@ class VerificationResult:
 
 
 @dataclass
+class TaskActionLog:
+    """A single action taken during task execution (Phase 4.6 log contract)."""
+
+    action: str = ""  # tool name or "verify"
+    target: str = ""  # file path or command
+    output: str = ""  # truncated result/note
+    ok: bool = False
+
+
+@dataclass
 class TaskOutcome:
     """Result of executing (and verifying) one task."""
 
-    task_id: str
+    task_id: str = ""
     ok: bool = False
     summary: str = ""
     iterations: int = 0
     verification: VerificationResult | None = None
     reason: str = ""
+    action_log: list[TaskActionLog] = field(default_factory=list)
 
 
 @dataclass
@@ -167,6 +180,8 @@ class TaskExecutor:
         should_stop: Callable[[], bool] | None = None,
         run_task: Callable[["TaskExecutor", Task], TaskOutcome] | None = None,
         verify: Callable[["TaskExecutor", Task], VerificationResult] | None = None,
+        approver: Callable[[str], bool] | None = None,
+        git_baseline: set[str] | None = None,
     ) -> None:
         self.config = config
         self.client = client
@@ -177,7 +192,11 @@ class TaskExecutor:
         self.should_stop = should_stop or (lambda: False)
         self.run_task = run_task or self._default_run_task
         self.verify = verify or self._verify_task
+        self.approver = approver
+        self.git_baseline = git_baseline or set()
+        self.max_verify_retries = config.max_verify_retries
         self.iterations = 0
+        self._last_verify_failure: str = ""
 
     # -- public API --------------------------------------------------------
 
@@ -235,37 +254,113 @@ class TaskExecutor:
         return execution
 
     def _execute_one(self, graph: TaskGraph, task: Task) -> TaskOutcome:
-        """Run one task to a terminal outcome, verifying it on success."""
+        """Run one task to a terminal outcome, verifying it on success.
+
+        Verification failures are retried up to ``self.max_verify_retries``
+        times: the failure detail is fed back to the model so it can correct
+        the implementation before the task is declared FAILED.
+        """
         graph.mark(task.id, RUNNING)
         self.log(f"[task {task.id}] running: {task.title}")
         emit_status(self.event_sink, "EXECUTING", f"Task {task.id}: {task.title}")
 
+        action_log: list[TaskActionLog] = []
+        outcome = TaskOutcome(task_id=task.id)
+        self._last_verify_failure = ""
+
+        # -- run task (model loop) ---------------------------------------
         outcome = self.run_task(self, task)
         self.iterations += outcome.iterations
+        action_log.extend(getattr(outcome, "action_log", []))
 
         if not outcome.ok:
+            reason = outcome.reason or outcome.summary
             graph.mark(
-                task.id,
-                FAILED,
+                task.id, FAILED,
                 retry_count=task.retry_count + 1,
-                failure_reason=outcome.reason or outcome.summary,
+                failure_reason=reason,
             )
-            emit_status(
-                self.event_sink, "FAILED", f"Task {task.id} failed: {outcome.reason or outcome.summary}"
-            )
+            emit_status(self.event_sink, "FAILED", f"Task {task.id} failed: {reason}")
+            emit_task_failed(self.event_sink, task.id, reason)
+            outcome.action_log = action_log
             return outcome
 
-        # Mark completed only once verification passes.
-        verification = self.verify(self, task)
-        outcome.verification = verification
-        if verification.ok:
-            graph.mark(task.id, COMPLETED, retry_count=task.retry_count, result=outcome.summary)
-            emit_status(self.event_sink, "EXECUTING", f"Task {task.id} verified")
-        else:
-            outcome.ok = False
-            outcome.reason = f"verification failed:\n{verification.detail}"
-            graph.mark(task.id, FAILED, retry_count=task.retry_count + 1,
-                       failure_reason=outcome.reason)
+        # -- verify with retries ----------------------------------------
+        for attempt in range(1, self.max_verify_retries + 2):
+            verification = self.verify(self, task)
+            outcome.verification = verification
+
+            if verification.ok:
+                graph.mark(
+                    task.id, COMPLETED,
+                    retry_count=task.retry_count,
+                    result=outcome.summary,
+                )
+                emit_status(self.event_sink, "EXECUTING", f"Task {task.id} verified")
+                emit_task_verified(
+                    self.event_sink, task.id, ok=True,
+                    summary=outcome.summary,
+                )
+                action_log.append(TaskActionLog(
+                    action="verify", target="acceptance criteria",
+                    output="passed", ok=True,
+                ))
+                outcome.action_log = action_log
+                return outcome
+
+            # verification failed
+            detail = verification.detail
+            action_log.append(TaskActionLog(
+                action="verify", target="acceptance criteria",
+                output=f"attempt {attempt}: {detail[:200]}", ok=False,
+            ))
+
+            if attempt <= self.max_verify_retries:
+                self._last_verify_failure = (
+                    f"Verification failed (attempt {attempt}/"
+                    f"{self.max_verify_retries + 1}):\n{detail}\n\n"
+                    "Fix the issue above and finish with "
+                    '{"done": true, "summary": "..."} so the task is re-verified.'
+                )
+                self.log(
+                    f"[task {task.id}] verify attempt {attempt} failed, "
+                    "retrying model loop..."
+                )
+                retry = self.run_task(self, task)
+                self.iterations += retry.iterations
+                action_log.extend(getattr(retry, "action_log", []))
+                if not retry.ok:
+                    reason = retry.reason or retry.summary
+                    graph.mark(
+                        task.id, FAILED,
+                        retry_count=task.retry_count + 1,
+                        failure_reason=reason,
+                    )
+                    emit_status(self.event_sink, "FAILED", f"Task {task.id} failed: {reason}")
+                    emit_task_failed(self.event_sink, task.id, reason)
+                    outcome.ok = False
+                    outcome.reason = reason
+                    outcome.action_log = action_log
+                    return outcome
+                outcome = retry
+                self._last_verify_failure = ""
+
+        # all retries exhausted
+        reason = f"verification failed after {self.max_verify_retries + 1} attempt(s):\n{detail}"
+        outcome.ok = False
+        outcome.reason = reason
+        graph.mark(
+            task.id, FAILED,
+            retry_count=task.retry_count + 1,
+            failure_reason=reason,
+        )
+        emit_status(self.event_sink, "FAILED", f"Task {task.id} failed: {reason}")
+        emit_task_failed(self.event_sink, task.id, reason)
+        emit_task_verified(
+            self.event_sink, task.id, ok=False,
+            summary=reason,
+        )
+        outcome.action_log = action_log
         return outcome
 
     def _completion_summary(self, graph: TaskGraph) -> str:
@@ -282,6 +377,83 @@ class TaskExecutor:
             except Exception as exc:  # noqa: BLE001 - persistence must not crash
                 self.log(f"[executor] could not persist task state: {exc}")
 
+    # -- mode gating -------------------------------------------------------
+
+    def _requires_approval(self, tool: str) -> bool:
+        """True when the tool needs operator approval (SAFE mode + modifying tool)."""
+        return self.config.is_safe_mode and tool in MODIFY_TOOLS
+
+    def _check_tool_allowed(self, tool: str) -> ToolResult | None:
+        """Check whether the current mode permits this tool.
+
+        Returns ``None`` when the tool is allowed (proceed), or a
+        ``ToolResult(ok=False)`` when it must be blocked.
+        """
+        if self.config.is_plan_mode and tool in MODIFY_TOOLS:
+            return ToolResult(
+                tool,
+                f"Blocked in PLAN mode: {tool!r} modifies the workspace. "
+                "Switch to BUILD or AUTO mode to make changes.",
+                ok=False,
+            )
+        if self._requires_approval(tool):
+            if self.approver is None:
+                return ToolResult(
+                    tool,
+                    f"SAFE mode: {tool!r} requires operator approval but no approver "
+                    "is configured. Pass --safe with an interactive session or "
+                    "provide an approver callback.",
+                    ok=False,
+                )
+            display = f"{tool}"
+            if not self.approver(display):
+                return ToolResult(
+                    tool,
+                    f"SAFE mode: operator declined {tool!r}.",
+                    ok=False,
+                )
+        return None  # allowed
+
+    def _check_git_dirty(self, tool: str, arguments: dict[str, Any]) -> ToolResult | None:
+        """Block writes to files that were dirty before ASCS started (Phase 4.4).
+
+        Only applies to modifying file tools; ``run_command`` is not gated
+        here (it is gated by SAFE mode approval instead).
+        """
+        if not self.git_baseline or tool not in (
+            "write_file", "apply_patch", "delete_file", "move_file", "copy_file",
+        ):
+            return None
+        # Extract the target path from the tool arguments.
+        target_path = arguments.get("path") or arguments.get("destination") or ""
+        if not target_path or not isinstance(target_path, str):
+            return None
+        # Normalize: just the relative path as git reports it.
+        target_rel = target_path.replace("\\", "/").strip()
+        if target_rel in self.git_baseline:
+            return ToolResult(
+                tool,
+                f"Protected: '{target_rel}' has pre-existing uncommitted changes. "
+                "ASCS will not overwrite existing user work. Proceed with a "
+                "different file or complete the current changes manually.",
+                ok=False,
+            )
+        return None
+
+    @staticmethod
+    def reset_stuck_tasks(graph: TaskGraph) -> list[str]:
+        """Reset any task stuck in RUNNING back to READY so resume can retry it.
+
+        An interrupted run may leave a task marked RUNNING; a resumed run
+        must not treat it as completed or block behind it.
+        """
+        reset: list[str] = []
+        for task in list(graph.tasks.values()):
+            if task.status == RUNNING:
+                graph.mark(task.id, READY)
+                reset.append(task.id)
+        return reset
+
     # -- default single-task model loop ------------------------------------
 
     def _default_run_task(self, executor, task: Task) -> TaskOutcome:
@@ -290,13 +462,26 @@ class TaskExecutor:
         Keeps the same tool contract as the main loop but scoped to one task,
         bounded by the config's iteration budget. Tolerates malformed replies
         up to a limit, and never trusts a model "done" without verification.
+        When the executor carries a ``_last_verify_failure`` (set on retry),
+        the failure detail is prepended to the user message so the model can
+        correct the implementation.
         """
+        system = task_system_prompt(task, _project_block(executor.store), self.config)
+
+        # Phase 4.7 retry: feed verification failure back to the model.
+        failure_context = getattr(executor, "_last_verify_failure", "")
+
+        user_msg = task_user_prompt(task)
+        if failure_context:
+            user_msg = (
+                f"YOUR PREVIOUS ATTEMPT FAILED VERIFICATION — FIX THE ISSUE:\n"
+                f"{failure_context}\n\n"
+                f"Original task:\n{user_msg}"
+            )
+
         messages = [
-            {
-                "role": "system",
-                "content": task_system_prompt(task, _project_block(executor.store), self.config),
-            },
-            {"role": "user", "content": task_user_prompt(task)},
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_msg},
         ]
         outcome = TaskOutcome(task_id=task.id)
 
@@ -350,6 +535,16 @@ class TaskExecutor:
                 f"{', '.join(self.config.effective_tools)}).",
                 ok=False,
             )
+        # Mode gate: PLAN = read-only; SAFE = approval before modify.
+        blocked = self._check_tool_allowed(tool)
+        if blocked is not None:
+            self.log(f"[task {task.id}:{iteration:02d}] {tool}: BLOCKED ({blocked.output[:100]})")
+            return blocked
+        # Git-dirty guard: block writes to pre-existing dirty files.
+        git_block = self._check_git_dirty(tool, arguments)
+        if git_block is not None:
+            self.log(f"[task {task.id}:{iteration:02d}] {tool}: GIT-BLOCKED ({git_block.output[:100]})")
+            return git_block
         result = execute_tool(tool, arguments, self.ws, self.config)
         self.log(f"[task {task.id}:{iteration:02d}] {tool}: {result.note or ('ok' if result.ok else 'FAILED')}")
         emit_activity(self.event_sink, f"Task {task.id}: {tool}")
@@ -363,6 +558,11 @@ class TaskExecutor:
         A verification string of the form ``run <command>`` is executed as a
         shell command; anything else is treated as a descriptive step and
         recorded. All executed commands must exit 0 for the task to pass.
+
+        Phase 4.5/4.6: respects mode gating — PLAN mode blocks ``run_command``
+        and modification commands; SAFE mode requires operator approval for
+        modifying commands.  Phase 4.7: implementing tasks with no actionable
+        verification steps are treated as *not fully verified*.
         """
         result = VerificationResult(task_id=task.id)
         steps: list[str] = []
@@ -376,9 +576,22 @@ class TaskExecutor:
             else:
                 steps.append(("check", stripped))
 
+        # Phase 4.7 no-steps policy: implementing tasks must have actionable
+        # verification or be treated as not fully verified.
         if not steps:
-            # Nothing to verify: an explicit no-op is treated as passing only
-            # if the task declares so; otherwise we flag a gap but allow it.
+            _is_implementing = task.kind in ("implement", "")
+            if _is_implementing:
+                result.steps.append({
+                    "step": "(no verification steps declared)",
+                    "status": "failed",
+                    "ok": False,
+                    "output": "Implementing task has no verification steps; "
+                              "add verification commands or checks to confirm "
+                              "the task is correct.",
+                })
+                result.ok = False
+                return result
+            # Non-implementing tasks (inspect/plan/review) pass with no steps.
             result.ok = True
             return result
 
@@ -388,6 +601,17 @@ class TaskExecutor:
                 result.steps.append(
                     {"step": payload, "status": "noted", "ok": True, "output": ""}
                 )
+                continue
+            # run_command in verify is gated like any other tool call.
+            blocked = self._check_tool_allowed("run_command")
+            if blocked is not None:
+                result.steps.append({
+                    "step": payload,
+                    "status": "blocked",
+                    "ok": False,
+                    "output": blocked.output,
+                })
+                all_ok = False
                 continue
             cmd = payload
             emit_command_started(self.event_sink, cmd)
@@ -440,6 +664,7 @@ def _trim_for_request(messages: list[dict[str, str]], budget: int) -> list[dict[
 
 
 __all__ = [
+    "TaskActionLog",
     "TaskExecutor",
     "TaskExecution",
     "TaskOutcome",
