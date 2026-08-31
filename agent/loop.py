@@ -55,6 +55,7 @@ from .events import (
     emit_status,
     emit_stopped,
     emit_task_completed,
+    emit_task_created,
     emit_task_plan,
     emit_task_started,
     emit_test_completed,
@@ -545,6 +546,14 @@ class AgentLoop:
                 self._step(
                     f"Git dirty baseline ({len(executor.git_baseline)} file(s)): "
                     f"{', '.join(sorted(executor.git_baseline)[:10])}"
+                )
+            for t in target.ordered():
+                emit_task_created(
+                    self.event_sink,
+                    t.id,
+                    t.title,
+                    depends_on=tuple(t.dependencies),
+                    n_files=len(t.files),
                 )
             execution: TaskExecution = executor.execute(objective, target)
 

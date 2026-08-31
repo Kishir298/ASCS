@@ -31,9 +31,12 @@ from .events import (
     emit_activity,
     emit_command_completed,
     emit_command_started,
+    emit_retry,
     emit_status,
     emit_task_failed,
+    emit_task_ready,
     emit_task_verified,
+    emit_verification_started,
     null_sink,
 )
 from .models import ToolResult, parse_model_reply, tool_result_message
@@ -286,6 +289,7 @@ class TaskExecutor:
                 task = ready[0]
                 failed_id = task.id
                 execution.iterations += 1
+                emit_task_ready(self.event_sink, task.id, task.title)
                 outcome = self._execute_one(graph, task)
                 execution.outcomes.append(outcome)
                 self.persist(graph)
@@ -351,7 +355,9 @@ class TaskExecutor:
             return outcome
 
         # -- verify with retries ----------------------------------------
+        retries_left = self.max_verify_retries
         for attempt in range(1, self.max_verify_retries + 2):
+            emit_verification_started(self.event_sink, task.id, attempt=attempt)
             verification = self.verify(self, task)
             outcome.verification = verification
 
@@ -365,6 +371,8 @@ class TaskExecutor:
                 emit_task_verified(
                     self.event_sink, task.id, ok=True,
                     summary=outcome.summary,
+                    attempt=attempt,
+                    retries_left=retries_left,
                 )
                 action_log.append(TaskActionLog(
                     action="verify", target="acceptance criteria",
@@ -381,6 +389,13 @@ class TaskExecutor:
             ))
 
             if attempt <= self.max_verify_retries:
+                emit_retry(
+                    self.event_sink,
+                    task_id=task.id,
+                    attempt=attempt,
+                    retries_left=max(0, retries_left - 1),
+                    reason=detail,
+                )
                 self._last_verify_failure = (
                     f"Verification failed (attempt {attempt}/"
                     f"{self.max_verify_retries + 1}):\n{detail}\n\n"
@@ -409,6 +424,7 @@ class TaskExecutor:
                     return outcome
                 outcome = retry
                 self._last_verify_failure = ""
+            retries_left -= 1
 
         # all retries exhausted
         reason = f"verification failed after {self.max_verify_retries + 1} attempt(s):\n{detail}"
@@ -424,6 +440,8 @@ class TaskExecutor:
         emit_task_verified(
             self.event_sink, task.id, ok=False,
             summary=reason,
+            attempt=self.max_verify_retries + 1,
+            retries_left=0,
         )
         outcome.action_log = action_log
         return outcome

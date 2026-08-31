@@ -260,3 +260,84 @@ def test_task_execution_result_helpers():
     assert execution.is_success
     assert execution.failed_tasks == []
     assert execution.completed_tasks == []
+
+
+def _make_with_sink(tmp_path, started=None, verify=None, event_sink=None):
+    config = AgentConfig(workspace=tmp_path, mode="AUTO")
+    return TaskExecutor(
+        config=config,
+        client=None,
+        workspace=Workspace(tmp_path),
+        event_sink=event_sink,
+        log=lambda m: None,
+        store=ProjectStore(tmp_path),
+        run_task=started or _ok,
+        verify=verify or _pass_verify,
+    )
+
+
+def _fail_twice_then_pass(max_retries):
+    calls = {"n": 0}
+
+    def verify(executor, task):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return VerificationResult(task_id=task.id, ok=False, steps=[])
+        return VerificationResult(task_id=task.id, ok=True, steps=[])
+
+    return verify
+
+
+def test_executor_emits_task_ready_and_verification_events(tmp_path):
+    events = []
+    executor = _make_with_sink(
+        tmp_path,
+        verify=_fail_twice_then_pass(2),
+        event_sink=events.append,
+    )
+    graph = _chain(["A"])
+    execution = executor.execute("job", graph)
+    assert execution.is_success
+
+    types = [e.type for e in events]
+    assert "task_ready" in types
+    assert "task_verified" in types
+    assert types.count("verification_started") >= 1
+
+    ready = next(e for e in events if e.type == "task_ready")
+    assert ready.status == "T1"
+
+    passed = next(e for e in events if e.type == "task_verified" and e.ok)
+    assert passed.attempt is not None
+    assert passed.retries_left is not None
+
+
+def test_executor_emits_retry_events_with_attempt_and_retries_left(tmp_path):
+    events = []
+    executor = _make_with_sink(
+        tmp_path,
+        verify=_fail_twice_then_pass(2),
+        event_sink=events.append,
+    )
+    executor.execute("job", _chain(["A"]))
+
+    retries = [e for e in events if e.type == "retry"]
+    assert len(retries) >= 1
+    assert all(e.attempt is not None for e in retries)
+    assert all(e.retries_left is not None for e in retries)
+    assert retries[0].status == "T1"
+
+
+def test_executor_emits_final_verification_failure_with_retry_fields(tmp_path):
+    events = []
+
+    def always_fail(executor, task):
+        return VerificationResult(task_id=task.id, ok=False, steps=[])
+
+    executor = _make_with_sink(tmp_path, verify=always_fail, event_sink=events.append)
+    executor.execute("job", _chain(["A"]))
+
+    failed = [e for e in events if e.type == "task_verified" and not e.ok]
+    assert failed, "expected a failed task_verified event"
+    assert failed[-1].attempt == 3          # max_verify_retries + 1
+    assert failed[-1].retries_left == 0

@@ -41,10 +41,15 @@ EVENT_TYPES = (
     "activity",
     "status",
     "task_plan",
+    "task_created",
+    "task_ready",
     "task_started",
+    "task_blocked",
     "task_verified",
+    "verification_started",
     "task_failed",
     "task_completed",
+    "retry",
 )
 
 
@@ -65,6 +70,8 @@ class AgentEvent:
     summary: str | None = None
     error: str | None = None
     elapsed: float | None = None
+    attempt: int | None = None
+    retries_left: int | None = None
     timestamp: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
@@ -388,14 +395,113 @@ def emit_task_completed(
     )
 
 
+def emit_task_created(
+    sink: EventSink | None,
+    task_id: str,
+    title: str,
+    *,
+    depends_on: tuple[str, ...] = (),
+    n_files: int = 0,
+) -> None:
+    """Emit that the planner produced a task in the graph."""
+    _emit(
+        sink,
+        AgentEvent(
+            type="task_created",
+            status=task_id,
+            message=title or task_id,
+            summary=f"{len(depends_on)} dep(s), {n_files} file(s)",
+        ),
+    )
+
+
+def emit_task_ready(sink: EventSink | None, task_id: str, title: str) -> None:
+    """Emit that a task's dependencies are satisfied and it is runnable."""
+    _emit(
+        sink,
+        AgentEvent(
+            type="task_ready",
+            status=task_id,
+            message=title or task_id,
+        ),
+    )
+
+
+def emit_task_blocked(
+    sink: EventSink | None,
+    task_id: str,
+    title: str,
+    *,
+    reason: str = "",
+) -> None:
+    """Emit that a task cannot run until its dependencies are satisfied."""
+    _emit(
+        sink,
+        AgentEvent(
+            type="task_blocked",
+            status=task_id,
+            message=title or task_id,
+            error=reason or "dependency not satisfied",
+        ),
+    )
+
+
+def emit_retry(
+    sink: EventSink | None,
+    *,
+    task_id: str,
+    attempt: int,
+    retries_left: int,
+    reason: str = "",
+) -> None:
+    """Emit a bounded retry of a task, verification, or model call."""
+    _emit(
+        sink,
+        AgentEvent(
+            type="retry",
+            status=task_id,
+            attempt=attempt,
+            retries_left=retries_left,
+            message=f"Retry {attempt} for task {task_id} "
+            f"({retries_left} retr{'y' if retries_left == 1 else 'ies'} left)",
+            error=reason or "",
+        ),
+    )
+
+
+def emit_verification_started(
+    sink: EventSink | None,
+    task_id: str,
+    *,
+    attempt: int = 1,
+) -> None:
+    """Emit that a task is about to run its acceptance verification."""
+    _emit(
+        sink,
+        AgentEvent(
+            type="verification_started",
+            status=task_id,
+            attempt=attempt,
+            message=f"Verifying task {task_id} (attempt {attempt})",
+        ),
+    )
+
+
 def emit_task_verified(
     sink: EventSink | None,
     task_id: str,
     *,
     ok: bool,
     summary: str = "",
+    attempt: int | None = None,
+    retries_left: int | None = None,
 ) -> None:
-    """Emit a per-task verification result (quality-gate outcome)."""
+    """Emit a per-task verification result (quality-gate outcome).
+
+    ``attempt`` is the 1-based verification attempt that produced the result
+    and ``retries_left`` the number of bounded retries that remain; both are
+    optional structured fields (omitted for the default/single-shot path).
+    """
     _emit(
         sink,
         AgentEvent(
@@ -404,6 +510,8 @@ def emit_task_verified(
             ok=ok,
             message=f"Task {task_id} verify {'passed' if ok else 'failed'}",
             summary=summary or "",
+            attempt=attempt,
+            retries_left=retries_left,
         ),
     )
 

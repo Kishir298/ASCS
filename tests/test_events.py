@@ -10,8 +10,14 @@ from agent.events import (
     emit_command_output,
     emit_model_completed,
     emit_model_started,
+    emit_retry,
     emit_status,
+    emit_task_blocked,
+    emit_task_created,
+    emit_task_ready,
+    emit_task_verified,
     emit_tool_completed,
+    emit_verification_started,
     to_event_dict,
 )
 
@@ -120,3 +126,87 @@ def test_status_event_roundtrip():
     data = json.loads(ev.to_json())
     assert data["status"] == "PLANNING"
     assert data["message"] == "model is analysing"
+
+
+def test_task_lifecycle_events_are_declared():
+    for t in (
+        "task_created",
+        "task_ready",
+        "task_blocked",
+        "verification_started",
+        "retry",
+    ):
+        assert t in EVENT_TYPES
+
+
+def test_task_created_event_carries_deps_and_files():
+    out = []
+    emit_task_created(
+        out.append,
+        "t1",
+        "Implement parser",
+        depends_on=("t0",),
+        n_files=3,
+    )
+    ev = out[0]
+    assert ev.type == "task_created"
+    assert ev.status == "t1"
+    assert ev.message == "Implement parser"
+    data = ev.to_dict()
+    assert data["summary"] == "1 dep(s), 3 file(s)"
+
+
+def test_task_ready_and_blocked_events():
+    out = []
+    emit_task_ready(out.append, "t1", "Implement parser")
+    emit_task_blocked(out.append, "t2", "Fix tests", reason="dependency not satisfied")
+    assert [e.type for e in out] == ["task_ready", "task_blocked"]
+    assert out[0].status == "t1"
+    assert out[1].error == "dependency not satisfied"
+
+
+def test_retry_event_carries_attempt_and_retries_left():
+    out = []
+    emit_retry(out.append, task_id="t1", attempt=1, retries_left=2, reason="tests fail")
+    ev = out[0]
+    assert ev.type == "retry"
+    assert ev.attempt == 1
+    assert ev.retries_left == 2
+    data = ev.to_dict()
+    assert data["attempt"] == 1
+    assert data["retries_left"] == 2
+
+
+def test_verification_started_event_carries_attempt():
+    out = []
+    emit_verification_started(out.append, "t1", attempt=2)
+    ev = out[0]
+    assert ev.type == "verification_started"
+    assert ev.status == "t1"
+    assert ev.attempt == 2
+
+
+def test_task_verified_carries_structured_retry_fields():
+    out = []
+    emit_task_verified(
+        out.append, "t1", ok=False, summary="boom",
+        attempt=3, retries_left=0,
+    )
+    ev = out[0]
+    assert ev.type == "task_verified"
+    assert ev.ok is False
+    assert ev.attempt == 3
+    assert ev.retries_left == 0
+    data = ev.to_dict()
+    assert data["attempt"] == 3
+    assert data["retries_left"] == 0
+    json.dumps(data)  # serializable
+
+
+def test_task_verified_optional_retry_fields_dropped_when_absent():
+    out = []
+    emit_task_verified(out.append, "t1", ok=True, summary="ok")
+    ev = out[0]
+    data = ev.to_dict()
+    assert "attempt" not in data
+    assert "retries_left" not in data

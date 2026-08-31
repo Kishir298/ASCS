@@ -93,6 +93,11 @@ want other machines on your LAN to reach it.
 Server-Sent Events at `/api/events`, plus `/api/task`, `/api/stop`,
 `/api/state`, `/api/status`, `/api/history`, `/api/clear`.
 
+> **Limitation:** the web UI runs the single-shot loop
+> (`agent.loop.run`). The task-graph engine (`--tasks`) is available from the
+> CLI (`risa --tasks "…"`) but is **not** wired into the browser UI; `--ui`
+> ignores `--tasks`.
+
 ## Events
 
 The loop emits structured, JSON-serializable events over SSE for the UI and
@@ -102,14 +107,23 @@ for future ASIS/TIVISS integrations:
 `activity`, `tool_started`, `tool_completed`, `file_read`, `file_written`,
 `patch_applied`, `command_started`, `command_output`, `command_completed`,
 `test_started`, `test_completed`, `agent_error`, `agent_stopped`,
-`agent_completed`, `task_plan`, `task_started`, `task_verified`, `task_failed`,
-`task_completed`.
+`agent_completed`, `task_plan`, `task_created`, `task_ready`,
+`task_started`, `task_blocked`, `task_verified`, `verification_started`,
+`task_failed`, `task_completed`, `retry`.
 
 The task-engine run additionally emits `task_plan` (the rendered plan for
-operator inspection), `task_started` / `task_completed` for each task that runs,
+operator inspection), `task_created` for every task when the graph is built,
+`task_ready` as a task's dependencies are satisfied, `task_started` /
+`task_completed` / `task_blocked` for each task as it runs or is blocked,
 `task_verified` / `task_failed` at the verification quality gate, and a
 human-readable step log (`task_started`/`task_completed` carry the task id
 in `status`).
+
+Verification is observable and explicit: `verification_started` announces each
+attempt, `retry` (with structured `attempt` and `retries_left` fields) marks a
+bounded re-verification, and the final `task_verified`/`task_failed` events
+carry the 1-based `attempt` and the number of `retries_left` (0 when exhausted)
+so a consumer can reconstruct exactly how many bounded retries ran.
 
 `command_output` carries the truncated stdout/stderr text of a
 `run_command`; a timed-out command is reported with exit code `-1` and never
