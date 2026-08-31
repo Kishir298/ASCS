@@ -15,6 +15,8 @@ from agent.ollama import (
     OllamaModelNotFoundError,
     OllamaResponseError,
     OllamaTimeoutError,
+    _strip_think_tags,
+    _strip_think_tags_streaming,
 )
 
 
@@ -345,4 +347,85 @@ def test_chat_resilient_fallback_for_plain_chat_clients():
 
     out = _resilient_chat(client, [{"role": "user", "content": "hi"}], format="json")
     assert out == '{"done": true, "summary": "ok"}'
+
+
+# ── think-tag stripping ────────────────────────────────────────────────────
+
+def test_strip_think_tags_removes_block():
+    text = '<think>Let me think...</think>\n{"tool": "read_file"}'
+    result = _strip_think_tags(text)
+    assert "<think>" not in result
+    assert "</think>" not in result
+    assert '{"tool": "read_file"}' in result
+
+
+def test_strip_think_tags_multiple_blocks():
+    text = '<think>first</think><think>second</think>done'
+    result = _strip_think_tags(text)
+    assert "<think>" not in result
+    assert result == "done"
+
+
+def test_strip_think_tags_no_tags_unchanged():
+    text = '{"done": true, "summary": "ok"}'
+    assert _strip_think_tags(text) == text
+
+
+def test_strip_think_tags_empty():
+    assert _strip_think_tags("") == ""
+
+
+def test_strip_think_tags_multiline():
+    text = "<think>\nline 1\nline 2\n</think>\nresult"
+    result = _strip_think_tags(text)
+    assert "<think>" not in result
+    assert "line 1" not in result
+    assert result == "result"
+
+
+def test_strip_think_tags_streaming_no_tags():
+    vis, buf = _strip_think_tags_streaming("", "hello world")
+    assert vis == "hello world"
+    assert buf == ""
+
+
+def test_strip_think_tags_streaming_complete_in_one_delta():
+    vis, buf = _strip_think_tags_streaming(
+        "", "<think>thinking</think>done"
+    )
+    assert vis == "done"
+    assert buf == ""
+
+
+def test_strip_think_tags_streaming_opening_only_buffers():
+    vis, buf = _strip_think_tags_streaming("", "<think>let me think")
+    assert vis == ""
+    assert "<think>" in buf
+
+
+def test_strip_think_tags_streaming_closing_after_buffer():
+    vis1, buf1 = _strip_think_tags_streaming("", "<think>let me think")
+    assert vis1 == ""
+    vis2, buf2 = _strip_think_tags_streaming(buf1, " about this...</think>result")
+    assert vis2 == "result"
+    assert buf2 == ""
+
+
+def test_strip_think_tags_streaming_normal_content_before_think():
+    vis, buf = _strip_think_tags_streaming("", "hello <think>thinking")
+    assert vis == "hello"
+    assert "<think>" in buf
+
+
+def test_strip_think_tags_streaming_two_round_trips():
+    """Full think block across 3 deltas: pre-text, think, post-text."""
+    vis, buf = _strip_think_tags_streaming("", "step 1")
+    assert vis == "step 1"
+    assert buf == ""
+    vis, buf = _strip_think_tags_streaming(buf, "<think>reasoning")
+    assert vis == ""
+    assert "<think>" in buf
+    vis, buf = _strip_think_tags_streaming(buf, " more</think>final")
+    assert vis == "final"
+    assert buf == ""
 

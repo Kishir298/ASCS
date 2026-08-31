@@ -14,6 +14,7 @@ Implementation notes:
 from __future__ import annotations
 
 import json
+import re as _re
 import threading
 import urllib.error
 import urllib.request
@@ -47,6 +48,52 @@ class OllamaModelNotFoundError(OllamaHTTPError):
 
 class OllamaResponseError(OllamaError):
     """The server returned something we could not interpret."""
+
+
+_THINK_TAG_RE = _re.compile(r"<think>.*?</think>", _re.DOTALL)
+
+
+def _strip_think_tags(content: str) -> str:
+    """Remove ``<think>...</think>`` blocks that Qwen3 and similar models emit.
+
+    The reasoning tokens inside ``<think>`` are useful to the model internally
+    but waste the context budget and can break downstream JSON parsing.
+    Stripping them keeps the visible response clean.
+    """
+    return _THINK_TAG_RE.sub("", content).strip()
+
+
+def _strip_think_tags_streaming(buffer: str, new_delta: str) -> tuple[str, str]:
+    """Strip ``<think>`` tags across streaming deltas.
+
+    Returns ``(visible_text, updated_buffer)`` where ``visible_text`` is
+    content safe to yield and ``updated_buffer`` carries any unfinished
+    think-tag state.
+
+    The web UI calls this for each streaming delta so partial think tags
+    that span multiple chunks are handled correctly.
+    """
+    combined = buffer + new_delta
+    # Fast path: no think-tag content at all.
+    if "<think>" not in combined:
+        return combined, ""
+    # Slow path: check for a completed think block.
+    if "</think>" in combined:
+        cleaned = _THINK_TAG_RE.sub("", combined).strip()
+        # After stripping, check if an incomplete opening tag remains
+        # (e.g. a new think block started but hasn't closed yet).
+        last_open = cleaned.rfind("<think>")
+        if last_open >= 0 and "</think>" not in cleaned[last_open:]:
+            # Keep only the part before the unfinished tag.
+            return cleaned[:last_open].rstrip(), cleaned[last_open:]
+        return cleaned, ""
+    # No closing tag yet: buffer everything (might be inside a think block).
+    last_open = combined.rfind("<think>")
+    if last_open >= 0:
+        return combined[:last_open].rstrip(), combined[last_open:]
+    # No opening tag — this shouldn't happen if <think> was in combined,
+    # but be safe.
+    return combined, ""
 
 
 def _chat_payload_error(status: int, body: str) -> OllamaError:
@@ -304,6 +351,7 @@ class OllamaClient:
         parsed = self._parse_chat_body(raw)
         message = parsed.get("message") or {}
         content = message.get("content") or ""
+        content = _strip_think_tags(content)
         if not content.strip() and "error" in parsed:
             raise OllamaResponseError(str(parsed["error"]))
         if not content.strip():
@@ -392,6 +440,7 @@ class OllamaClient:
         try:
             with urllib.request.urlopen(req, timeout=timeout or self.request_timeout) as resp:
                 self._track(resp, timeout or self.request_timeout)
+                think_buffer = ""
                 try:
                     for raw_line in resp:
                         line = raw_line.decode("utf-8", errors="replace").strip()
@@ -402,8 +451,11 @@ class OllamaClient:
                         except json.JSONDecodeError:
                             continue
                         delta = (obj.get("message") or {}).get("content") or ""
-                        if delta:
-                            yield delta
+                        visible, think_buffer = _strip_think_tags_streaming(
+                            think_buffer, delta,
+                        )
+                        if visible:
+                            yield visible
                 finally:
                     self._untrack(resp)
         except urllib.error.HTTPError as exc:
