@@ -18,7 +18,7 @@ import sys
 
 from . import __version__
 from .config import DEFAULT_UI_HOST, DEFAULT_UI_PORT, MODES, AgentConfig, load_config
-from .loop import run_agent
+from .loop import run_agent, run_graph_agent
 from .ollama import OllamaClient, OllamaError
 from .web import serve
 from .workspace import Workspace, WorkspaceError
@@ -67,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         default=None,
-        help="Ollama model to use (default: qwen2.5-coder:14b).",
+        help="Ollama model to use (default: qwen3:14b).",
     )
     parser.add_argument(
         "--base-url",
@@ -90,6 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--auto",
         action="store_true",
         help="Execute valid tool calls automatically (default).",
+    )
+    parser.add_argument(
+        "--tasks",
+        action="store_true",
+        help="Use the task-graph engine: plan the objective into a DAG of "
+        "tasks and execute/verify them one by one (resumable via .ascs).",
     )
     parser.add_argument(
         "--verbose",
@@ -250,7 +256,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        result = run_agent(config, client, task, log=_print_step)
+        if args.tasks:
+            result = run_graph_agent(config, client, task, log=_print_step)
+        else:
+            result = run_agent(config, client, task, log=_print_step)
     except KeyboardInterrupt:
         _print_step("\nCancelled.")
         return 130
@@ -260,14 +269,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(f"\nSTATUS: {result.status.upper()}")
-    if result.plan is not None:
+    plan = getattr(result, "plan", None)
+    if plan:
         print("Plan:")
-        print(result.plan.to_text())
-    if result.iterations:
+        print(plan)
+    if getattr(result, "iterations", None):
         print(f"Iterations: {result.iterations}")
-    if result.summary:
+    elif isinstance(getattr(result, "task_count", None), int) and result.task_count:
+        print(f"Tasks: {result.task_count}")
+    if getattr(result, "summary", ""):
         print(f"Summary: {result.summary}")
-    if result.error:
+    if getattr(result, "error", ""):
         _print_error(result.error)
 
     return 0 if result.is_complete else 1

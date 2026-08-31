@@ -69,7 +69,7 @@ class OllamaClient:
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "qwen2.5-coder:14b",
+        model: str = "qwen3:14b",
         request_timeout: int = 600,
         keep_alive: str | None = None,
     ) -> None:
@@ -226,7 +226,7 @@ class OllamaClient:
     def warm(self, timeout: int = 120) -> None:
         """Probe the model with a tiny request to trigger (cold) model load.
 
-        Local models such as ``qwen2.5-coder:14b`` can take tens of seconds to
+        Local models such as ``qwen3:14b`` can take tens of seconds to
         load on first use. Warming up eagerly makes the first real step reach
         the model instead of paying the load latency mid-task. A slow warm is
         *not* an error; ``OllamaError`` subclasses still propagate.

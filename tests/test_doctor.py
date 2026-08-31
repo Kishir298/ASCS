@@ -13,7 +13,8 @@ class FakeClient:
     """Scripted stand-in for OllamaClient used by the doctor checks."""
 
     def __init__(self, *, base_url="http://fake:11434", model="m", request_timeout=600,
-                 keep_alive=None, reachable=True, installed=None, verify_error=None):
+                 keep_alive=None, reachable=True, installed=None, verify_error=None,
+                 chat_error=None, chat_reply="pong"):
         self.base_url = base_url
         self.model = model
         self.request_timeout = request_timeout
@@ -21,6 +22,8 @@ class FakeClient:
         self.reachable = reachable
         self.installed = installed if installed is not None else ["m"]
         self.verify_error = verify_error
+        self.chat_error = chat_error
+        self.chat_reply = chat_reply
 
     def check_connectivity(self, timeout=5):
         if self.verify_error:
@@ -31,6 +34,11 @@ class FakeClient:
         if self.verify_error:
             raise RuntimeError(self.verify_error)
         return list(self.installed)
+
+    def chat(self, messages, *, format="json", options=None, timeout=None):
+        if self.chat_error:
+            raise RuntimeError(self.chat_error)
+        return self.chat_reply
 
 
 @pytest.fixture
@@ -52,11 +60,14 @@ def test_doctor_happy_path(tmp_path, patch_ollama):
     assert report.ok
     names = {r.name for r in report.results}
     assert {"python", "install", "config", "workspace", "ollama", "model",
-            "tools", "context", "project", "git", "tests"} <= names
+            "model_query", "tools", "context", "project", "git", "tests",
+            "task_engine"} <= names
     # No failures anywhere; context and git may legitimately WARN.
     assert report.failed == []
     assert next(r for r in report.results if r.name == "ollama").status == "PASS"
     assert next(r for r in report.results if r.name == "model").status == "PASS"
+    assert next(r for r in report.results if r.name == "model_query").status == "PASS"
+    assert next(r for r in report.results if r.name == "task_engine").status == "PASS"
 
 
 def test_doctor_missing_workspace(tmp_path, patch_ollama):
@@ -114,6 +125,29 @@ def test_doctor_context_pass_with_index(tmp_path, patch_ollama):
     ctx = next(r for r in report.results if r.name == "context")
     assert ctx.status == "PASS"
     assert "records" in ctx.message.lower()
+
+
+def test_doctor_model_query_warns_when_unresponsive(tmp_path, patch_ollama):
+    patch_ollama(model="m", installed=["m"], chat_error="timed out")
+    report = doctor(workspace=tmp_path, model="m")
+    query = next(r for r in report.results if r.name == "model_query")
+    assert query.status == "WARN"
+    assert "did not respond" in query.message.lower()
+
+
+def test_doctor_model_query_ok(tmp_path, patch_ollama):
+    patch_ollama(model="m", installed=["m"], chat_reply="pong")
+    report = doctor(workspace=tmp_path, model="m")
+    query = next(r for r in report.results if r.name == "model_query")
+    assert query.status == "PASS"
+
+
+def test_doctor_task_engine_present(tmp_path, patch_ollama):
+    patch_ollama()
+    report = doctor(workspace=tmp_path)
+    te = next(r for r in report.results if r.name == "task_engine")
+    assert te.status == "PASS"
+    assert "round-trips" in te.message.lower()
 
 
 def test_print_doctor_renders_statuses(tmp_path, patch_ollama, capsys):

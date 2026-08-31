@@ -60,6 +60,8 @@ class Task:
     retry_count: int = 0
     failure_reason: str = ""
     result: str = ""
+    complexity: str = "medium"  # small | medium | large
+    kind: str = "implement"  # plan | inspect | implement | verify | review
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -77,6 +79,10 @@ class Task:
     @property
     def is_terminal(self) -> bool:
         return self.status in TERMINAL_STATUSES
+
+    @property
+    def is_small(self) -> bool:
+        return self.complexity in ("", "small")
 
 
 class TaskGraphError(ContextError):
@@ -242,6 +248,48 @@ class TaskGraph:
             t.status in (COMPLETED, SKIPPED) for t in self.tasks.values()
         )
 
+    def tasks_by_status(self, status: str) -> list[Task]:
+        """Tasks currently in ``status``, ordered by id for determinism."""
+        return [
+            self.tasks[tid]
+            for tid in sorted(self.tasks)
+            if self.tasks[tid].status == status
+        ]
+
+    @property
+    def failed(self) -> list[Task]:
+        return self.tasks_by_status(FAILED)
+
+    @property
+    def blocked(self) -> list[Task]:
+        return self.tasks_by_status(BLOCKED)
+
+    @property
+    def first_failure(self) -> Task | None:
+        order = {t.id: i for i, t in enumerate(self.ordered())}
+        seen: Task | None = None
+        for task in self.failed:
+            if seen is None or order.get(task.id, 0) < order.get(seen.id, 0):
+                seen = task
+        return seen
+
+    def cascade_cancel(self) -> list[str]:
+        """Mark as CANCELLED every non-terminal task that cannot proceed.
+
+        A task is cancelled here only when it is *blocked* by a failed/cancelled
+        dependency, or is itself unstarted and transitively depends on a
+        terminal-failure path. Independent unscheduled tasks are left alone so
+        they can still run.
+        """
+        self.recompute_statuses()
+        cancelled: list[str] = []
+        for task in list(self.tasks.values()):
+            if task.status == BLOCKED:
+                cancelled.append(task.id)
+        for task_id in cancelled:
+            self.mark(task_id, CANCELLED)
+        return cancelled
+
     # -- persistence ------------------------------------------------------
 
     def to_dict(self) -> dict:
@@ -269,8 +317,8 @@ def plan_to_graph(
     """Convert a :class:`~agent.models.Plan` into a sequential :class:`TaskGraph`.
 
     Each plan step becomes a task. Steps are ordered sequentially (each step
-    depends on the previous one) when the plan is a plain ordered list, which
-    is the natural reading of a `set_plan` output.
+    depends on the previous one), which is the natural reading of a `set_plan`
+    output for a plain ordered list.
     """
     graph = TaskGraph()
     previous: str | None = None
@@ -287,6 +335,116 @@ def plan_to_graph(
     return graph
 
 
+def build_graph_from_specs(
+    specs: Sequence[Task | dict],
+    *,
+    prefix: str = "task",
+    suppress_status_recompute: bool = False,
+) -> TaskGraph:
+    """Build a dependency-aware :class:`TaskGraph` from structured task specs.
+
+    Each spec is either a :class:`Task` or a dict with keys matching the
+    ``Task`` dataclass fields (``id``, ``title``, ``description``,
+    ``dependencies``, ``files``, ``commands``, ``verification``,
+    ``complexity``, ``kind``, ``priority``, ...).
+
+    Unlike :func:`plan_to_graph` (which wires a flat list into a linear chain),
+    this preserves the **explicit dependency graph** declared by each spec, so
+    the result can express fan-in/fan-out (the ``T1 -> T2/T3 -> T4`` shape).
+
+    Missing ids default to ``prefix-N`` deterministically. After construction
+    the graph's dependency graph is validated (cycle + unknown-dependency
+    detection).
+    """
+    graph = TaskGraph()
+    for index, spec in enumerate(specs, start=1):
+        if isinstance(spec, Task):
+            task = spec
+        elif isinstance(spec, dict):
+            payload = dict(spec)
+            if not payload.get("id"):
+                payload["id"] = f"{prefix}-{index}"
+            task = Task.from_dict(payload)
+        else:
+            raise TaskGraphError(
+                f"Invalid task spec #{index}: expected Task or dict, got {type(spec).__name__}"
+            )
+        if not task.title:
+            task.title = task.description or task.id
+        graph.add(task)
+
+    graph.validate()
+    if not suppress_status_recompute:
+        graph.recompute_statuses()
+    return graph
+
+
+def chunk_graph(
+    graph: TaskGraph,
+    *,
+    split_at_complexity: str = "large",
+    max_files_per_task: int = 4,
+) -> TaskGraph:
+    """Automatically split oversized tasks into smaller, coherent subtasks.
+
+    * A task whose ``complexity`` reaches ``split_at_complexity`` is split
+      along its declared files: one subtask per file (plus one for any
+      commands), each inheriting the parent's dependencies and a new dependency
+      on its siblings so they stay ordered.
+    * Subtasks too small to be meaningful (no files, no commands, no
+      verification, ``small`` complexity) are left as-is rather than over-split.
+
+    Returns a *new* graph so the caller keeps the original intact. The IDs of
+    subtasks are ``<parent>.<n>``. This is a deterministic, heuristic pass used
+    by the planner before execution.
+    """
+    result = TaskGraph()
+
+    for task in sorted(graph.tasks.values(), key=lambda t: t.id):
+        if task.complexity != split_at_complexity:
+            result.add(task)
+            continue
+
+        pieces: list[tuple[str, str, list[str]]] = []
+        for index, file in enumerate(task.files[:max_files_per_task], start=1):
+            pieces.append(
+                (f"{task.id}.{index}", f"{task.title}: {file}", [file])
+            )
+        if not pieces:
+            pieces.append((f"{task.id}.1", task.title, []))
+        if task.commands and len(pieces) < max_files_per_task + 1:
+            pieces.append(
+                (
+                    f"{task.id}.{len(pieces) + 1}",
+                    f"{task.title}: run commands",
+                    [],
+                )
+            )
+
+        for index, (sub_id, sub_title, files) in enumerate(pieces, start=1):
+            deps = list(task.dependencies)
+            if len(pieces) > 1 and index > 1:
+                deps.append(pieces[index - 2][0])
+            result.add(
+                Task(
+                    id=sub_id,
+                    title=sub_title,
+                    description=task.description,
+                    dependencies=deps,
+                    priority=task.priority,
+                    files=files,
+                    commands=list(task.commands),
+                    verification=list(task.verification),
+                    complexity="medium",
+                    kind=task.kind,
+                    status=PENDING,
+                )
+            )
+    result.recompute_statuses()
+    result.validate()
+    return result
+
+
 __all__ = [
     "BLOCKED",
     "CANCELLED",
@@ -301,5 +459,7 @@ __all__ = [
     "TaskGraph",
     "TaskGraphError",
     "VALID_STATUSES",
+    "build_graph_from_specs",
+    "chunk_graph",
     "plan_to_graph",
 ]

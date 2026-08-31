@@ -162,6 +162,66 @@ def _check_model(cfg: AgentConfig) -> CheckResult:
     return CheckResult("model", PASS, f"Model {cfg.model!r} installed")
 
 
+def _check_model_query(cfg: AgentConfig) -> CheckResult:
+    """Verify the model is actually queryable, not merely installed.
+
+    Sends a tiny prompt and confirms a non-empty response comes back. A slow
+    local model can time out on first load, so a query failure is reported as a
+    WARN (non-fatal) rather than a hard FAIL.
+    """
+    client = OllamaClient(
+        base_url=cfg.ollama_base_url,
+        model=cfg.model,
+        request_timeout=cfg.request_timeout,
+        keep_alive=cfg.keep_alive,
+    )
+    try:
+        response = client.chat(
+            [{"role": "user", "content": "Reply with the single word: pong"}],
+            format=None,
+            timeout=max(20, cfg.request_timeout),
+        )
+    except Exception as exc:  # noqa: BLE001 - doctor must never crash
+        return CheckResult(
+            "model_query",
+            WARN,
+            f"Model {cfg.model!r} is installed but did not respond to a probe: {exc}. "
+            "Recovery: confirm the model serves requests (e.g. `ollama run "
+            f"{cfg.model}`) and that keep_alive/request timeouts are sane.",
+        )
+    if not (response or "").strip():
+        return CheckResult(
+            "model_query", WARN, f"Model {cfg.model!r} returned an empty reply."
+        )
+    return CheckResult(
+        "model_query", PASS, f"Model {cfg.model!r} responds to a generation probe"
+    )
+
+
+def _check_task_engine(cfg: AgentConfig) -> CheckResult:
+    """Verify the task engine (planner + executor + task graph) is importable
+    and the graph model round-trips through persistence losslessly."""
+    try:
+        from .executor import TaskExecutor  # noqa: F401
+        from .planner import plan_objective  # noqa: F401
+        from .tasks import Task, TaskGraph, build_graph_from_specs
+    except Exception as exc:  # pragma: no cover - defensive
+        return CheckResult("task_engine", FAIL, f"Task engine import failed: {exc}")
+    try:
+        graph = build_graph_from_specs(
+            [
+                {"id": "T1", "title": "A"},
+                {"id": "T2", "title": "B", "dependencies": ["T1"]},
+            ]
+        )
+        round_trip = TaskGraph.from_dict(graph.to_dict())
+        assert len(round_trip) == 2
+        assert round_trip.task("T2").dependencies == ["T1"]
+    except Exception as exc:  # pragma: no cover - defensive
+        return CheckResult("task_engine", FAIL, f"Task graph model failed: {exc}")
+    return CheckResult("task_engine", PASS, "Task engine modules healthy; graph round-trips")
+
+
 def _check_tools() -> CheckResult:
     from .tools import TOOL_SPECS
 
@@ -263,11 +323,13 @@ def doctor(*, workspace: str | Path | None = None, **config_overrides) -> Doctor
     results.append(_check_workspace(cfg))
     results.append(_check_ollama(cfg))
     results.append(_check_model(cfg))
+    results.append(_check_model_query(cfg))
     results.append(_check_tools())
     results.append(_check_context_index(cfg))
     results.append(_check_project(cfg))
     results.append(_check_git(cfg))
     results.append(_check_tests(cfg))
+    results.append(_check_task_engine(cfg))
     return DoctorReport(results)
 
 

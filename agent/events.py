@@ -40,6 +40,9 @@ EVENT_TYPES = (
     "mode_changed",
     "activity",
     "status",
+    "task_plan",
+    "task_started",
+    "task_completed",
 )
 
 
@@ -330,3 +333,54 @@ def emit_error(sink: EventSink | None, message: str, error: str = "") -> None:
 
 def emit_stopped(sink: EventSink | None, message: str = "Agent stopped") -> None:
     _emit(sink, AgentEvent(type="agent_stopped", message=message))
+
+
+def emit_task_plan(
+    sink: EventSink | None,
+    plan_text: str,
+    *,
+    task_count: int = 0,
+) -> None:
+    """Emit the rendered task plan for operator inspection."""
+    _emit(
+        sink,
+        AgentEvent(
+            type="task_plan",
+            message=plan_text,
+            summary=f"{task_count} task(s)",
+        ),
+    )
+
+
+def emit_task_started(
+    sink: EventSink | None,
+    task_id: str,
+    title: str,
+) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="task_started",
+            status=task_id,
+            message=title or task_id,
+        ),
+    )
+
+
+def emit_task_completed(
+    sink: EventSink | None,
+    task_id: str,
+    *,
+    ok: bool,
+    summary: str = "",
+) -> None:
+    _emit(
+        sink,
+        AgentEvent(
+            type="task_completed",
+            status=task_id,
+            ok=ok,
+            summary=summary or "",
+            message=f"Task {task_id} {'completed' if ok else 'failed'}",
+        ),
+    )

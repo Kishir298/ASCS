@@ -33,6 +33,12 @@ def test_defaults(monkeypatch, tmp_path):
     assert not cfg.is_safe_mode
 
 
+def test_default_model_is_qwen3_14b():
+    # The shipped default must be the documented Qwen3 model, while remaining
+    # overrideable via --model / OLLAMA_MODEL (model-agnostic).
+    assert DEFAULT_MODEL == "qwen3:14b"
+
+
 def test_env_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://example:9999")
     monkeypatch.setenv("OLLAMA_MODEL", "deepseek-coder:6.7b")

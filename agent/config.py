@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
-DEFAULT_MODEL = "qwen2.5-coder:14b"
+DEFAULT_MODEL = "qwen3:14b"
 DEFAULT_MAX_ITERATIONS = 50
 DEFAULT_UI_HOST = "127.0.0.1"
 DEFAULT_UI_PORT = 8787

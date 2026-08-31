@@ -22,7 +22,7 @@ real STOP/cancellation.
 - Python 3.12+
 - [Ollama](https://ollama.com) running locally (`ollama serve`, default
   `http://localhost:11434`)
-- A code model, e.g. `ollama pull qwen2.5-coder:14b`
+- A code model, e.g. `ollama pull qwen3:14b`
 
 ## Install
 
@@ -31,7 +31,7 @@ pip install -e .
 risa --check
 ```
 
-The default model is `qwen2.5-coder:14b`. Override it per run with
+The default model is `qwen3:14b`. Override it per run with
 `--model`, or set any model via environment variables (see Configuration).
 
 ## Quick start
@@ -48,6 +48,10 @@ risa --mode plan "How should we split the config loader into modules?"
 
 # Build mode: plan, get the plan shown, then implement
 risa --mode build --workspace ./backend "Refactor the auth module"
+
+# Task-graph engine: split the objective into a DAG of tasks and run them
+# task-by-task (each verified), persisted to .ascs for resuming
+risa --tasks "Refactor the auth module"
 
 # Web UI (opens at http://127.0.0.1:8787)
 risa --ui
@@ -98,7 +102,12 @@ for future ASIS/TIVISS integrations:
 `activity`, `tool_started`, `tool_completed`, `file_read`, `file_written`,
 `patch_applied`, `command_started`, `command_output`, `command_completed`,
 `test_started`, `test_completed`, `agent_error`, `agent_stopped`,
-`agent_completed`.
+`agent_completed`, `task_plan`, `task_started`, `task_completed`.
+
+The task-engine run additionally emits `task_plan` (the rendered plan for
+operator inspection), `task_started` / `task_completed` for each task that runs,
+and a human-readable step log (`task_started`/`task_completed` carry the task id
+in `status`).
 
 `command_output` carries the truncated stdout/stderr text of a
 `run_command`; a timed-out command is reported with exit code `-1` and never
@@ -130,12 +139,15 @@ status for each item, with actionable recovery hints:
 - Python environment and A.S.C.S. install
 - Configuration validity
 - Workspace existence and containment
-- Ollama connectivity and the configured model
+- Ollama connectivity, the configured model **installed**, and a live
+  **model-query probe** (a slow/unresponsive local model is reported as a WARN)
 - Registered tools
 - Persistent context index health
 - Project manifest / discovery state
 - Git availability
 - pytest availability
+- **Task engine** integrity (planner + executor importable; task-graph model
+  round-trips through persistence)
 
 ## Project intelligence
 
@@ -165,9 +177,28 @@ Plans and work items are structured as a dependency-aware **task graph**
 (`agent.tasks`) with explicit statuses
 (`pending → ready → running → completed / failed / blocked / cancelled /
 skipped`). Each task carries its own description, dependencies, files,
-commands, verification list, retry count and failure reason. Task graphs
-persist to `.ascs/task_state.json`, which is the foundation for resuming
-interrupted objectives rather than restarting them.
+commands, verification list, retry count and failure reason, plus a
+`complexity` (small/medium/large) and `kind` (inspect/plan/implement/verify/
+review).
+
+The engine is fully implemented and reachable via `risa --tasks "…"`:
+
+1. **Plan** (`agent.planner`) — the model decomposes the objective into a
+   validated DAG (fan-in/fan-out supported), seeded by the project manifest and
+   hierarchical retrieval. Oversized (`large`) tasks are automatically
+   re-chunked into per-file subtasks, and every task is guaranteed a
+   verification step.
+2. **Execute** (`agent.executor`) — `agent/executor.py` walks the graph, runs
+   each ready task with a **task-scoped system prompt**, then verifies it
+   against its acceptance criteria (each `run …` verification step must exit 0)
+   before marking it complete. A failing task cancels its dependents.
+3. **Inspect & resume** — progress is persisted to `.ascs/task_state.json`
+   after every task; a run can be resumed from that state. The plan and each
+   task are surfaced through `task_plan` / `task_started` / `task_completed`
+   events plus a human-readable step log.
+
+The classic single-shot loop (`risa "…"`, no `--tasks`) remains the default
+mode and is unchanged.
 
 ## Configuration
 
@@ -179,7 +210,7 @@ Environment variables (CLI flags win, both override defaults):
 | `AGENT_APPROVAL`         | in SAFE mode, auto-approve all       | off (ask each time)   |
 | `AGENT_UI_HOST` / `AGENT_UI_PORT` | web UI bind address / port | `127.0.0.1` / `8787` |
 | `OLLAMA_BASE_URL`        | Ollama server URL                    | `http://localhost:11434` |
-| `OLLAMA_MODEL`           | Ollama model                         | `qwen2.5-coder:14b`   |
+| `OLLAMA_MODEL`           | Ollama model                         | `qwen3:14b`   |
 | `AGENT_MAX_ITERATIONS`   | agent iteration budget (→ `TIMEOUT`) | `50`                  |
 | `AGENT_REQUEST_TIMEOUT`  | per-model-call timeout (s)           | `600`                 |
 | `AGENT_COMMAND_TIMEOUT`  | default `run_command` timeout (s)    | `120`                 |
@@ -200,4 +231,5 @@ pytest
 Test suite covers the tool layer, the loop's lifecycle/plan/mode/cancellation
 behaviour (using scripted fake clients — no Ollama required), event emission,
 the Ollama HTTP client against an in-process mock server, the state machine,
-the staged boot, and the web server endpoints.
+the staged boot, the web server endpoints, and the task engine (planner,
+executor, and task-graph DAG behaviour).

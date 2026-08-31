@@ -38,6 +38,7 @@ from typing import Any, Callable
 
 from . import state as _state
 from .config import AgentConfig, MODIFY_TOOLS
+from .executor import TaskExecutor, TaskExecution
 from .events import (
     EventSink,
     emit_activity,
@@ -53,6 +54,9 @@ from .events import (
     emit_started,
     emit_status,
     emit_stopped,
+    emit_task_completed,
+    emit_task_plan,
+    emit_task_started,
     emit_test_completed,
     emit_test_started,
     emit_tool_completed,
@@ -68,6 +72,7 @@ from .ollama import (
     OllamaResponseError,
     OllamaTimeoutError,
 )
+from .planner import plan_objective, plan_text
 from .prompts import (
     malformed_feedback,
     system_prompt,
@@ -75,6 +80,7 @@ from .prompts import (
     tool_error_feedback,
 )
 from .state import StateTracker
+from .tasks import Task
 from .tools import execute_tool
 from .workspace import Workspace
 
@@ -119,6 +125,24 @@ def is_test_command(command: str) -> bool:
     return bool(_TEST_COMMAND_RE.search(command or ""))
 
 
+def _chat_value(text: str):
+    """Extract a JSON value (object or array) from a planner reply, else raw text."""
+    import json
+
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    for opener in ("{", "["):
+        start = raw.find(opener)
+        if start < 0:
+            continue
+        try:
+            return json.JSONDecoder().raw_decode(raw[start:].lstrip())[0]
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return raw
+
+
 @dataclass
 class LoopResult:
     status: str = "interrupted"  # completed|max_iterations|interrupted|cancelled|fatal|malformed
@@ -128,6 +152,25 @@ class LoopResult:
     steps: list[str] = field(default_factory=list)
     error: str = ""
     plan: Plan | None = None
+
+    @property
+    def is_complete(self) -> bool:
+        return self.status == "completed"
+
+
+@dataclass
+class GraphLoopResult:
+    """Outcome of a task-graph-driven run (planner + executor)."""
+
+    status: str = "completed"  # completed|partial|cancelled|failed|fatal
+    objective: str = ""
+    summary: str = ""
+    iterations: int = 0
+    plan: str = ""  # human-readable plan (plan_text)
+    steps: list[str] = field(default_factory=list)
+    task_count: int = 0
+    progress: dict = field(default_factory=dict)
+    error: str = ""
 
     @property
     def is_complete(self) -> bool:
@@ -411,6 +454,166 @@ class AgentLoop:
                 "fatal", "Ollama request failed.", iteration, _state.FAILED, error=str(exc)
             )
 
+    # -- task-graph driven execution (planner + executor) -------------------
+
+    def run_graph(
+        self,
+        objective: str,
+        *,
+        resume: bool = False,
+        graph: Task | None = None,
+    ) -> GraphLoopResult:
+        """Plan ``objective`` into a task graph and execute it task-by-task.
+
+        This is the complementary task-driven path to :meth:`run`. It:
+
+        * plans the objective into a validated, size-controlled
+          :class:`~agent.tasks.TaskGraph` via :func:`~agent.planner.plan_objective`,
+        * persists progress to ``.ascs/task_state.json`` and can resume an
+          in-progress run,
+        * emits task-plan / task-started / task-completed inspection events and
+          keeps a human-readable step log,
+        * verifies each task against its acceptance criteria before marking it
+          complete.
+
+        ``graph`` is a reserved hook (currently unused) so callers may later
+        inject a prepared graph; the normal flow plans it from ``objective``.
+        """
+        self.tracker.configure(mode=self.config.mode, task=objective)
+        emit_started(self.event_sink, "A.S.C.S. task engine started")
+        emit_mode_changed(self.event_sink, self.config.mode)
+        self._step(f"Objective: {objective[:300]}")
+        self._step(f"Workspace: {self.ws.root}")
+        self._step(
+            f"Model: {self.client.model}  Mode: {self.config.primary_mode}  "
+            f"Task engine: on  Max iterations/task: {self.config.max_iterations}"
+        )
+        self.tracker.start(_state.PLANNING)
+
+        from .project import ProjectStore
+
+        store = ProjectStore(self.ws.root)
+        store.refresh()
+
+        result = GraphLoopResult(objective=objective)
+
+        try:
+            planned = self._plan_objective(objective, store)
+            result.plan = planned["text"]
+            result.task_count = planned["count"]
+            self._step("Plan:")
+            for line in result.plan.splitlines():
+                self._step(f"  {line}")
+            emit_task_plan(self.event_sink, result.plan, task_count=result.task_count)
+
+            target = planned["graph"]
+            if resume:
+                persisted = store.load_task_graph()
+                if persisted and len(persisted) and not persisted.all_complete:
+                    target = persisted
+                    self._step("Resuming an in-progress task graph from .ascs/task_state.json")
+
+            executor = self._build_executor(store)
+            execution: TaskExecution = executor.execute(objective, target)
+
+            result.status = execution.status
+            result.summary = execution.summary
+            result.iterations = execution.iterations
+            result.progress = execution.progress
+            result.steps = list(self._steps)
+            if execution.status in ("completed", "partial") and execution.failed_tasks:
+                result.status = "partial"
+
+            if execution.status == "completed" and result.summary:
+                self._set_state(_state.COMPLETE, result.summary)
+            elif execution.status == "cancelled":
+                self._set_state(_state.CANCELLED, result.summary)
+            else:
+                self._set_state(_state.FAILED, result.summary)
+
+            return result
+        except OllamaModelNotFoundError as exc:
+            result.status = "fatal"
+            result.error = f"Model '{self.client.model}' is not installed on the Ollama server."
+            self._step(f"[error] {result.error}")
+            self._set_state(_state.FAILED, result.error)
+            return result
+        except OllamaError as exc:
+            result.status = "fatal"
+            result.error = f"Ollama request failed: {exc}"
+            self._step(f"[error] {result.error}")
+            self._set_state(_state.FAILED, result.error)
+            return result
+        except Exception as exc:  # defensive: the task engine must not crash the CLI
+            result.status = "fatal"
+            result.error = f"Task engine error: {exc}"
+            self._step(f"[error] {result.error}")
+            self._set_state(_state.FAILED, result.error)
+            return result
+
+    def _plan_objective(self, objective: str, store) -> dict:
+        """Ask the model to decompose ``objective`` into a task graph."""
+        from .planner import project_intelligence
+
+        intelligence = project_intelligence(store, objective)
+        from .planner import planner_prompt
+
+        prompt = planner_prompt(objective, intelligence)
+        raw = self.client.chat(
+            [{"role": "user", "content": prompt}], format="json"
+        )
+        from .planner import parse_tasks
+
+        parsed = _chat_value(raw)
+        specs = parse_tasks(parsed)
+        if not specs:
+            specs = [
+                {
+                    "title": objective,
+                    "description": objective,
+                    "kind": "implement",
+                    "verification": ["confirm the objective is satisfied"],
+                }
+            ]
+        from .tasks import build_graph_from_specs, chunk_graph
+
+        graph = build_graph_from_specs(specs)
+        if any(t.complexity == "large" for t in graph.tasks.values()):
+            graph = chunk_graph(graph)
+        # Guarantee verification on every task via planner heuristics.
+        from .planner import _derive_verification
+
+        for task in graph.tasks.values():
+            if not task.verification:
+                task.verification = _derive_verification(
+                    {"title": task.title, "description": task.description,
+                     "kind": task.kind, "files": task.files},
+                    intelligence,
+                )
+        graph.recompute_statuses()
+        graph.validate()
+        return {"graph": graph, "text": plan_text(graph), "count": len(graph)}
+
+    def _build_executor(self, store) -> TaskExecutor:
+        def wired_run(executor, task):
+            emit_task_started(self.event_sink, task.id, task.title)
+            outcome = executor._default_run_task(executor, task)
+            emit_task_completed(
+                self.event_sink, task.id, ok=outcome.ok, summary=outcome.summary
+            )
+            return outcome
+
+        return TaskExecutor(
+            config=self.config,
+            client=self.client,
+            workspace=self.ws,
+            store=store,
+            event_sink=self.event_sink,
+            log=self.log,
+            should_stop=self.should_stop,
+            run_task=wired_run,
+        )
+
     # -- internals ----------------------------------------------------------
 
     def _run_tool(self, tool: str, arguments: dict[str, Any], iteration: int) -> ToolResult:
@@ -578,3 +781,28 @@ def run_agent(
         tracker=tracker,
     )
     return loop.run(task)
+
+
+def run_graph_agent(
+    config: AgentConfig,
+    client: OllamaClient,
+    objective: str,
+    *,
+    log: Callable[[str], None] | None = None,
+    event_sink: EventSink | None = None,
+    should_stop: Callable[[], bool] | None = None,
+    tracker: StateTracker | None = None,
+    resume: bool = False,
+) -> GraphLoopResult:
+    """Run the task-graph-driven pipeline end-to-end (plan -> execute -> verify)."""
+    workspace = Workspace(config.workspace)
+    loop = AgentLoop(
+        config,
+        client,
+        workspace,
+        log=log,
+        event_sink=event_sink,
+        should_stop=should_stop,
+        tracker=tracker,
+    )
+    return loop.run_graph(objective, resume=False if not resume else True)
