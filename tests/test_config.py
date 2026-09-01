@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agent.config import (
+    DEFAULT_KEEP_ALIVE,
     DEFAULT_MAX_ITERATIONS,
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_BASE_URL,
@@ -23,6 +24,9 @@ def test_defaults(monkeypatch, tmp_path):
         "AGENT_COMMAND_TIMEOUT",
         "AGENT_MAX_OUTPUT_CHARS",
         "AGENT_CONTEXT_BUDGET_CHARS",
+        "AGENT_KEEP_ALIVE",
+        "AGENT_EXPERIENCE_ENABLED",
+        "AGENT_EXPERIENCE_PATH",
     ):
         monkeypatch.delenv(name, raising=False)
     cfg = load_config(workspace=str(tmp_path))
@@ -31,6 +35,21 @@ def test_defaults(monkeypatch, tmp_path):
     assert cfg.max_iterations == DEFAULT_MAX_ITERATIONS
     assert cfg.mode == "AUTO"
     assert not cfg.is_safe_mode
+    assert cfg.keep_alive == "30m"
+    assert cfg.experience_enabled is True
+
+
+def test_keep_alive_env_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_KEEP_ALIVE", "5m")
+    cfg = load_config(workspace=str(tmp_path))
+    assert cfg.keep_alive == "5m"
+    # Empty value falls back to the default, never a bare keep-alive sentinel.
+    monkeypatch.setenv("AGENT_KEEP_ALIVE", "")
+    assert load_config(workspace=str(tmp_path)).keep_alive == "30m"
+
+
+def test_default_keep_alive_constant():
+    assert DEFAULT_KEEP_ALIVE == "30m"
 
 
 def test_default_model_is_qwen3_14b():

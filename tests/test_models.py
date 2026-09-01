@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent.models import ToolResult, parse_model_reply, tool_result_message, truncate
+from agent.models import Plan, ToolResult, parse_model_reply, tool_result_message, truncate
 
 
 def test_parse_tool_call():
@@ -104,3 +104,37 @@ def test_tool_result_to_model_text():
     assert "succeeded" in tr.to_model_text()
     tr2 = ToolResult("run_command", "err", ok=False)
     assert "FAILED" in tr2.to_model_text()
+
+
+# ── Plan model ──────────────────────────────────────────────────────────────
+
+def test_plan_from_value_dict_step_with_detail_appends_once():
+    plan = Plan.from_value(
+        {
+            "goal": "refactor",
+            "plan": [
+                {"step": "Inspect", "detail": "read the module"},
+                "Edit",
+                {"detail": "Run tests"},
+            ],
+        }
+    )
+    assert plan.goal == "refactor"
+    assert plan.steps == [
+        "Inspect: read the module",
+        "Edit",
+        "Run tests",
+    ]
+
+
+def test_plan_from_value_plain_strings():
+    plan = Plan.from_value(
+        {"goal": "build", "plan": ["one", "two", "three"]}
+    )
+    assert plan.steps == ["one", "two", "three"]
+
+
+def test_plan_from_value_empty_plan_placeholder():
+    plan = Plan.from_value({"goal": "do it", "plan": []})
+    assert plan.goal == "do it"
+    assert plan.steps == ["No explicit plan provided."]

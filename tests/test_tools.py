@@ -185,6 +185,7 @@ def test_run_command_timeout_is_a_failure(tmp_path, config):
     assert not r.ok  # a timeout never counts as success
     assert "TIMED OUT" in r.output
     assert "timed out" in (r.note or "")
+    assert "after 1s" in (r.note or "")  # f-string note carries the real timeout
 
 
 def test_workspace_escape_via_tool_blocked(tmp_path, config):
