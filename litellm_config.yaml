@@ -1,7 +1,7 @@
 model_list:
   - model_name: claude-opus-5
     litellm_params:
-      model: ollama/qwen2.5-coder:14b
+      model: ollama/qwen3:14b
       api_base: http://127.0.0.1:11434
       think: false
 

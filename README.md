@@ -293,6 +293,15 @@ Environment variables (CLI flags win, both override defaults):
 | `AGENT_CONTEXT_BUDGET_CHARS` | rolling conversation budget      | `70000`               |
 | `AGENT_MALFORMED_RETRY_LIMIT` | bad-reply retries before `FAILED` | `5`               |
 | `AGENT_MAX_VERIFY_RETRIES` | verification failure retries per task | `2`           |
+| `AGENT_NUM_CTX`          | Qwen3 context window size          | `32768`               |
+| `AGENT_NUM_PREDICT`      | max tokens generated per request   | `8192`                |
+| `AGENT_MAX_RETRIES`      | retries past the initial attempt   | `2`                   |
+| `AGENT_BACKOFF_S`        | base backoff between retries (s)   | `2.0`                 |
+
+The `AGENT_NUM_CTX` / `AGENT_NUM_PREDICT` values are sent **only** to the native
+Ollama `/api/chat` endpoint (as `options`); they are never forwarded to an
+OpenAI-compatible endpoint. See `docs/OLLAMA_SETUP.md` for the full local-model
+setup and verification, including the OpenCode `ollama/qwen3:14b` config.
 
 ## Development
 
@@ -304,9 +313,18 @@ python -m pytest
 ```
 
 All tests run offline against scripted fake clients and an in-process mock
-Ollama server — **no Ollama required**. The single skipped test is the opt-in
-live-model smoke check (`test_live_model_smoke`), enabled with `RISALIVE=1`,
-which takes minutes because it talks to a real local `qwen3:14b`.
+Ollama server — **no Ollama required**. The skipped tests are the opt-in live
+checks that need a real local `qwen3:14b` and a running Ollama server,
+gated behind `RISALIVE=1`:
+
+```powershell
+$env:RISALIVE="1"; pytest -q tests/test_ollama_live.py   # bash: RISALIVE=1 pytest -q ...
+$env:RISALIVE=""
+```
+
+On a machine with a running Ollama and `qwen3:14b` installed these take
+minutes; otherwise they skip. See `docs/OLLAMA_SETUP.md` for the full Windows
+setup and verification.
 
 Test suite covers the tool layer, the loop's lifecycle/plan/mode/cancellation
 behaviour (using scripted fake clients — no Ollama required), event emission,
