@@ -6,6 +6,7 @@ import json
 
 from agent.config import AgentConfig
 from agent.loop import AgentLoop, GraphLoopResult
+from agent.ollama import OllamaResponseError
 from agent.project import ProjectStore
 from agent.tasks import COMPLETED, Task, TaskGraph
 from agent.workspace import Workspace
@@ -92,6 +93,36 @@ def test_run_graph_falls_back_when_planner_returns_nothing(tmp_path):
     result = loop.run_graph("Do the thing")
     assert result.status == "completed"
     assert result.task_count == 1
+
+
+class _EmptyPlannerClient(FakeClient):
+    def chat(self, messages, *, format="json", options=None, timeout=None):
+        if self.index == 0:
+            self.index += 1
+            raise OllamaResponseError("Ollama returned an empty assistant response")
+        return super().chat(messages, format=format, options=options, timeout=timeout)
+
+
+def test_run_graph_falls_back_when_planner_response_unusable(tmp_path):
+    """An empty/think-only planner reply must degrade to a single task, not fatal."""
+    # The first slot is consumed by the planner's unusable reply; the second
+    # slot is the executor's "done" verdict for the fallback task.
+    client = _EmptyPlannerClient(
+        [
+            json.dumps({"purpose": "consumed by the raised planner reply"}),
+            json.dumps({"done": True, "summary": "wrote it"}),
+        ]
+    )
+    config = AgentConfig(workspace=tmp_path, mode="AUTO")
+    ws = Workspace(tmp_path)
+    loop = AgentLoop(config, client, ws, log=lambda m: None)
+    result = loop.run_graph("Do the thing")
+    assert result.status == "completed"  # not fatal
+    assert result.task_count == 1
+    store = ProjectStore(tmp_path)
+    loaded = store.load_task_graph()
+    assert loaded is not None
+    assert loaded.task("task-1").status == COMPLETED
 
 
 def test_run_graph_resumes_persisted_graph(tmp_path):

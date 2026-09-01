@@ -706,12 +706,19 @@ class AgentLoop:
             intelligence,
             self._experience_block(objective, limit=4, max_chars=3000),
         )
-        raw = _resilient_chat(
-            self.client,
-            [{"role": "user", "content": prompt}],
-            format="json",
-            should_stop=self.should_stop,
-        )
+        try:
+            raw = _resilient_chat(
+                self.client,
+                [{"role": "user", "content": prompt}],
+                format="json",
+                should_stop=self.should_stop,
+            )
+        except OllamaResponseError as exc:
+            self._step(
+                f"[planner] unusable model response, falling back to a "
+                f"single task: {exc}"
+            )
+            raw = "{}"
         from .planner import parse_tasks
 
         parsed = _chat_value(raw)
