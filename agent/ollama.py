@@ -22,6 +22,12 @@ import urllib.error
 import urllib.request
 from typing import Any, Iterator
 
+from .config import (
+    DEFAULT_MODEL,
+    DEFAULT_OLLAMA_BASE_URL,
+    DEFAULT_REQUEST_TIMEOUT,
+)
+
 
 class OllamaError(Exception):
     """Base class for all Ollama client errors."""
@@ -133,14 +139,30 @@ def _chat_payload_error(status: int, body: str) -> OllamaError:
     )
 
 
+def resilient_chat(client, messages: list[dict[str, str]], **kwargs: Any) -> str:
+    """Issue a chat request, using the resilient (retrying) path when available.
+
+    Real :class:`OllamaClient` instances provide ``chat_resilient`` (bounded
+    retry on transient connection/5xx errors); test fakes fall back to their
+    plain ``chat`` (which does not accept the ``should_stop`` retry hook, so
+    that kwarg is stripped).
+    """
+    chat_resilient = getattr(client, "chat_resilient", None)
+    if chat_resilient is not None:
+        return chat_resilient(messages, **kwargs)
+    chat = getattr(client, "chat")
+    kwargs.pop("should_stop", None)
+    return chat(messages, **kwargs)
+
+
 class OllamaClient:
     """Minimal HTTP client for a local Ollama server."""
 
     def __init__(
         self,
-        base_url: str = "http://localhost:11434",
-        model: str = "qwen3:14b",
-        request_timeout: int = 600,
+        base_url: str = DEFAULT_OLLAMA_BASE_URL,
+        model: str = DEFAULT_MODEL,
+        request_timeout: int = DEFAULT_REQUEST_TIMEOUT,
         keep_alive: str | None = None,
         num_ctx: int | None = None,
         num_predict: int | None = None,

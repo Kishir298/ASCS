@@ -40,7 +40,7 @@ from .events import (
     null_sink,
 )
 from .models import ToolResult, parse_model_reply, tool_result_message
-from .ollama import OllamaClient, OllamaError
+from .ollama import OllamaClient, OllamaError, resilient_chat
 from .prompts import system_prompt
 from .tasks import COMPLETED, FAILED, PENDING, READY, RUNNING, SKIPPED, Task, TaskGraph
 from .tools import execute_tool
@@ -590,7 +590,7 @@ class TaskExecutor:
                 outcome.action_log = action_log
                 return outcome
             try:
-                reply_text = _resilient_chat(
+                reply_text = resilient_chat(
                     self.client,
                     _trim_for_request(messages, self.config.context_budget_chars),
                     format="json",
@@ -784,15 +784,6 @@ def _action_target(tool: str, arguments: dict[str, Any]) -> str:
         if isinstance(value, str) and value:
             return value
     return "<no target>"
-
-
-def _resilient_chat(client, messages: list[dict[str, str]], **kwargs) -> str:
-    """Issue a chat request, using the resilient (retrying) path when available."""
-    if hasattr(client, "chat_resilient"):
-        return client.chat_resilient(messages, **kwargs)
-    chat = getattr(client, "chat")
-    kwargs.pop("should_stop", None)
-    return chat(messages, **kwargs)
 
 
 __all__ = [

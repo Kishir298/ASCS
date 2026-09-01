@@ -105,7 +105,11 @@ def _mode_instructions(config: AgentConfig) -> str:
     )
 
 
-def system_prompt(config: AgentConfig, project: str | None = None) -> str:
+def system_prompt(
+    config: AgentConfig,
+    project: str | None = None,
+    experience: str | None = None,
+) -> str:
     today = datetime.date.today().isoformat()
     tools = _enabled_tool_text(config)
     mode_section = _mode_instructions(config)
@@ -117,6 +121,13 @@ def system_prompt(config: AgentConfig, project: str | None = None) -> str:
             "this, it is scan-derived, not guessed)\n"
             f"{project.strip()}\n\n"
         )
+    experience_section = ""
+    if experience and experience.strip():
+        experience_section = (
+            "PAST EXPERIENCE (verified outcomes from earlier runs - reuse "
+            "successful approaches and avoid repeated failures)\n"
+            f"{experience.strip()}\n\n"
+        )
     return f"""You are the A.S.C.S. coding agent (A Smart Coding System), an autonomous local coding assistant backed by Ollama.
 
 Current date: {today}
@@ -125,7 +136,7 @@ You are working inside a repository rooted at the workspace directory. You
 MAY use file tools and run development commands there. You must NEVER modify
 anything outside the workspace.
 
-{project_section}{mode_section}
+{project_section}{experience_section}{mode_section}
 
 RESPONSE CONTRACT
 =================

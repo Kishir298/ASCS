@@ -65,6 +65,7 @@ from .events import (
     null_sink,
 )
 from .models import Plan, ToolResult, parse_model_reply, tool_result_message
+from .experience import ExperienceStore, format_for_prompt
 from .ollama import (
     OllamaClient,
     OllamaConnectionError,
@@ -72,6 +73,7 @@ from .ollama import (
     OllamaModelNotFoundError,
     OllamaResponseError,
     OllamaTimeoutError,
+    resilient_chat,
 )
 from .planner import plan_objective, plan_text
 from .prompts import (
@@ -147,16 +149,9 @@ def _chat_value(text: str):
 def _resilient_chat(client, messages: list[dict[str, str]], **kwargs) -> str:
     """Issue a chat request, using the resilient (retrying) path when available.
 
-    Real :class:`~agent.ollama.OllamaClient` instances provide
-    ``chat_resilient`` (bounded retry on transient connection/5xx errors);
-    test fakes fall back to their plain ``chat`` (which does not accept the
-    ``should_stop`` retry hook, so that kwarg is stripped).
+    Backward-compatible alias for :func:`agent.ollama.resilient_chat`.
     """
-    if hasattr(client, "chat_resilient"):
-        return client.chat_resilient(messages, **kwargs)
-    chat = getattr(client, "chat")
-    kwargs.pop("should_stop", None)
-    return chat(messages, **kwargs)
+    return resilient_chat(client, messages, **kwargs)
 
 
 @dataclass
@@ -224,6 +219,12 @@ class AgentLoop:
         self._last_ok = True
         self._repeat_count = 0
         self._plan: Plan | None = None
+        self._task_text: str = ""
+        self.experience: ExperienceStore | None = (
+            ExperienceStore(path=config.experience_path)
+            if config.experience_enabled
+            else None
+        )
 
     # -- logging / events ---------------------------------------------------
 
@@ -273,11 +274,108 @@ class AgentLoop:
         except Exception as exc:  # noqa: BLE001 - discovery must never block the agent
             return f"- Project discovery unavailable: {exc}"
 
+    def _experience_block(
+        self,
+        task_text: str,
+        *,
+        limit: int = 5,
+        max_chars: int = 4000,
+    ) -> str:
+        """Retrieve compact, relevant prior experience for a new task.
+
+        Best-effort and bounded: only a handful of ranked experiences are
+        returned, never the full store. Failures degrade to an empty block so
+        experience can never block a run.
+        """
+        if self.experience is None:
+            return ""
+        try:
+            hits = self.experience.search(task_text, limit=limit)
+            if not hits:
+                return ""
+            return format_for_prompt(hits, max_chars=max_chars)
+        except Exception as exc:  # noqa: BLE001 - experience must never block a run
+            self.log(f"[experience] retrieval failed: {exc}")
+            return ""
+
+    def _save_experience(
+        self,
+        *,
+        task: str,
+        success: bool,
+        outcome: str,
+        plan: str = "",
+        errors: list[str] | None = None,
+        observations: list[str] | None = None,
+    ) -> None:
+        """Persist a verified run outcome and handle contradiction decay.
+
+        Only verified states are recorded (completed success, failed runs).
+        After a failed run, overlapping successful experiences are penalised so
+        a repeatedly contradicted approach slowly loses trust.
+        """
+        if self.experience is None:
+            return
+        try:
+            record = self.experience.save_run(
+                task=task,
+                outcome=outcome,
+                success=success,
+                plan=plan,
+                observations=observations or [],
+                errors=errors or [],
+                feedback="",
+                tags=[self.config.primary_mode],
+            )
+            if not success:
+                self.experience.penalize_contradictions(
+                    task,
+                    exclude_id=record.experience_id,
+                )
+        except Exception as exc:  # noqa: BLE001 - learning must never crash a run
+            self.log(f"[experience] could not record run experience: {exc}")
+
+    def _save_verified_experience(self, execution, result: GraphLoopResult) -> None:
+        """Persist a task-graph run outcome from verified execution data.
+
+        Only terminal outcomes (completed/partial/failed) are stored.
+        ``partial``/``failed`` runs contribute structured ``errors`` taken from
+        real failed-task reasons, so the experience reflects verified failure
+        rather than model chatter.
+        """
+        if self.experience is None:
+            return
+        if execution.status not in ("completed", "partial", "failed"):
+            return
+
+        errors: list[str] = []
+        for failure in getattr(execution, "failed_tasks", []) or []:
+            reason = (failure.reason or failure.summary or "")[:500]
+            if reason:
+                errors.append(reason)
+        if getattr(result, "error", ""):
+            errors.append(result.error[:500])
+
+        observations = [step[:300] for step in self._steps[-25:]] or None
+        self._save_experience(
+            task=self._task_text or execution.objective,
+            success=execution.status == "completed",
+            outcome=(getattr(result, "report", "") or execution.summary)[:2000],
+            plan=getattr(result, "plan", "") or "",
+            errors=errors or None,
+            observations=observations,
+        )
+
     def run(self, task: str) -> LoopResult:
+        self._task_text = task
         self._messages = [
             {
                 "role": "system",
-                "content": system_prompt(self.config, self._project_prompt_block()),
+                "content": system_prompt(
+                    self.config,
+                    self._project_prompt_block(),
+                    self._experience_block(task),
+                ),
             },
             task_message(task),
         ]
@@ -500,6 +598,7 @@ class AgentLoop:
         inject a prepared graph; the normal flow plans it from ``objective``.
         """
         self.tracker.configure(mode=self.config.mode, task=objective)
+        self._task_text = objective
         emit_started(self.event_sink, "A.S.C.S. task engine started")
         emit_mode_changed(self.event_sink, self.config.mode)
         self._step(f"Objective: {objective[:300]}")
@@ -573,6 +672,8 @@ class AgentLoop:
             else:
                 self._set_state(_state.FAILED, result.summary)
 
+            self._save_verified_experience(execution, result)
+
             return result
         except OllamaModelNotFoundError as exc:
             result.status = "fatal"
@@ -600,7 +701,11 @@ class AgentLoop:
         intelligence = project_intelligence(store, objective)
         from .planner import planner_prompt
 
-        prompt = planner_prompt(objective, intelligence)
+        prompt = planner_prompt(
+            objective,
+            intelligence,
+            self._experience_block(objective, limit=4, max_chars=3000),
+        )
         raw = _resilient_chat(
             self.client,
             [{"role": "user", "content": prompt}],
@@ -817,6 +922,17 @@ class AgentLoop:
         error: str = "",
         plan: Plan | None = None,
     ) -> LoopResult:
+        if terminal_state in (_state.COMPLETE, _state.FAILED) and self._task_text:
+            self._save_experience(
+                task=self._task_text,
+                success=terminal_state == _state.COMPLETE,
+                outcome=summary,
+                plan=plan.to_text() if plan else "",
+                errors=[error] if error else None,
+                observations=(
+                    [step[:300] for step in self._steps[-25:]] or None
+                ),
+            )
         self.tracker.finish(terminal_state, summary)
         if terminal_state == _state.COMPLETE:
             emit_completed(self.event_sink, summary, summary=summary)

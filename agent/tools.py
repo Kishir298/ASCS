@@ -477,7 +477,7 @@ def _run_command(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
         "run_command",
         truncate_env(output, cfg.max_output_chars),
         ok=not timed_out,
-        note=("timed out after {timeout}s" if timed_out else f"exit code {rc}"),
+        note=(f"timed out after {timeout}s" if timed_out else f"exit code {rc}"),
     )
 
 

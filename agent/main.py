@@ -17,7 +17,15 @@ import argparse
 import sys
 
 from . import __version__
-from .config import DEFAULT_UI_HOST, DEFAULT_UI_PORT, MODES, AgentConfig, load_config
+from .config import (
+    DEFAULT_MODEL,
+    DEFAULT_OLLAMA_BASE_URL,
+    DEFAULT_UI_HOST,
+    DEFAULT_UI_PORT,
+    MODES,
+    AgentConfig,
+    load_config,
+)
 from .loop import run_agent, run_graph_agent
 from .ollama import OllamaClient, OllamaError
 from .web import serve
@@ -67,12 +75,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         default=None,
-        help="Ollama model to use (default: qwen3:14b).",
+        help=f"Ollama model to use (default: {DEFAULT_MODEL}).",
     )
     parser.add_argument(
         "--base-url",
         default=None,
-        help="Ollama server URL (default: http://localhost:11434).",
+        help=f"Ollama server URL (default: {DEFAULT_OLLAMA_BASE_URL}).",
     )
     parser.add_argument(
         "--max-iterations",

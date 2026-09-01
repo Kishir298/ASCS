@@ -29,6 +29,8 @@ from pathlib import Path
 
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_MODEL = "qwen3:14b"
+DEFAULT_REQUEST_TIMEOUT = 600  # seconds; single model request budget
+DEFAULT_KEEP_ALIVE = "30m"  # Ollama model persistence between requests
 DEFAULT_MAX_ITERATIONS = 50
 DEFAULT_UI_HOST = "127.0.0.1"
 DEFAULT_UI_PORT = 8787
@@ -85,8 +87,8 @@ class AgentConfig:
     approval: bool = False  # True -> prompt before modifications/commands
     verbose: bool = False
     command_timeout: int = 120  # seconds
-    request_timeout: int = 600  # seconds; single model request budget
-    keep_alive: str | None = None  # Ollama keep_alive e.g. "30m"
+    request_timeout: int = DEFAULT_REQUEST_TIMEOUT  # seconds; single model request budget
+    keep_alive: str | None = DEFAULT_KEEP_ALIVE  # Ollama keep_alive e.g. "30m"
     prewarm: bool = True  # warm the model before the first real step
     num_ctx: int = DEFAULT_NUM_CTX  # Qwen3 context window size
     num_predict: int = DEFAULT_NUM_PREDICT  # max tokens generated per request
@@ -96,6 +98,8 @@ class AgentConfig:
     context_budget_chars: int = 70_000  # rolling history budget
     max_verify_retries: int = 2  # verification failure retries per task
     malformed_retry_limit: int = 5
+    experience_enabled: bool = False  # persist/retrieve experience across runs
+    experience_path: str | None = None  # custom experience store path (default: ~/.risa/ascs)
     ui_host: str = DEFAULT_UI_HOST
     ui_port: int = DEFAULT_UI_PORT
     tools: tuple[str, ...] = field(
@@ -219,8 +223,8 @@ def load_config(**overrides) -> AgentConfig:
         "approval": approval_raw,
         "verbose": _env_bool("AGENT_VERBOSE", False),
         "command_timeout": _env_int("AGENT_COMMAND_TIMEOUT", 120),
-        "request_timeout": _env_int("AGENT_REQUEST_TIMEOUT", 600),
-        "keep_alive": _env_str("AGENT_KEEP_ALIVE", "") or None,
+        "request_timeout": _env_int("AGENT_REQUEST_TIMEOUT", DEFAULT_REQUEST_TIMEOUT),
+        "keep_alive": _env_str("AGENT_KEEP_ALIVE", DEFAULT_KEEP_ALIVE) or None,
         "prewarm": _env_bool("AGENT_PREWARM", True),
         "num_ctx": _env_int("AGENT_NUM_CTX", DEFAULT_NUM_CTX),
         "num_predict": _env_int("AGENT_NUM_PREDICT", DEFAULT_NUM_PREDICT),
@@ -230,6 +234,8 @@ def load_config(**overrides) -> AgentConfig:
         "context_budget_chars": _env_int("AGENT_CONTEXT_BUDGET_CHARS", 70_000),
         "malformed_retry_limit": _env_int("AGENT_MALFORMED_RETRY_LIMIT", 5),
         "max_verify_retries": _env_int("AGENT_MAX_VERIFY_RETRIES", 2),
+        "experience_enabled": _env_bool("AGENT_EXPERIENCE_ENABLED", True),
+        "experience_path": _env_str("AGENT_EXPERIENCE_PATH", "") or None,
         "ui_host": _env_str("AGENT_UI_HOST", DEFAULT_UI_HOST),
         "ui_port": _env_int("AGENT_UI_PORT", DEFAULT_UI_PORT),
     }

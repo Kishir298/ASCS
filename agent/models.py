@@ -159,12 +159,13 @@ class Plan:
                     raw_steps.append(item.strip())
                 elif isinstance(item, dict):
                     step = item.get("step")
-                    if not step and "detail" in item:
-                        step = item["detail"]
-                    elif isinstance(step, str) and item.get("detail"):
-                        raw_steps.append(f"{step}: {item['detail']}")
-                    if step:
+                    detail = item.get("detail")
+                    if isinstance(step, str) and detail:
+                        raw_steps.append(f"{step}: {detail}")
+                    elif step:
                         raw_steps.append(str(step).strip())
+                    elif detail:
+                        raw_steps.append(str(detail).strip())
         elif isinstance(value, dict):
             goal = value.get("goal") or ""
             plan = value.get("plan")

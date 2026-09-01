@@ -349,6 +349,58 @@ class ExperienceStore:
 
             return target
 
+    def penalize_contradictions(
+        self,
+        task: str,
+        *,
+        exclude_id: str = "",
+        delta: float = 0.2,
+    ) -> list[str]:
+        """Lower the score of successful experiences a newer failed run contradicts.
+
+        This is the contradiction learning signal: when a later run about a
+        strongly overlapping task fails, previously stored successful
+        experiences for that task become less trusted. Each contradiction
+        reduces their score by ``delta`` (floor -1.0), so a repeatedly
+        contradicted experience is progressively superseded.
+
+        Returns the ids of the adjusted experiences.
+        """
+        if not task.strip():
+            return []
+        if delta <= 0:
+            raise ValueError("delta must be positive")
+
+        query_tokens = _tokens(task)
+        if not query_tokens:
+            return []
+
+        touched: list[str] = []
+
+        with self._lock:
+            experiences = self.load()
+
+            changed = False
+            required = max(1, len(query_tokens) // 2)
+
+            for experience in experiences:
+                if not experience.success:
+                    continue
+                if experience.experience_id == exclude_id:
+                    continue
+                overlap = len(query_tokens & _tokens(experience.task))
+                if overlap < required:
+                    continue
+
+                experience.score = max(-1.0, experience.score - delta)
+                touched.append(experience.experience_id)
+                changed = True
+
+            if changed:
+                self._rewrite(experiences)
+
+        return touched
+
     def clear(self) -> None:
         """Delete all stored experiences."""
         with self._lock:

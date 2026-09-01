@@ -209,8 +209,22 @@ def _first_test_command(project_manifest_text: str) -> str:
 def planner_prompt(
     objective: str,
     project_intelligence: str,
+    experience_context: str = "",
 ) -> str:
-    """Build the decomposition prompt handed to the model."""
+    """Build the decomposition prompt handed to the model.
+
+    ``experience_context`` is an optional block of verified experiences from
+    earlier runs (see :func:`agent.experience.format_for_prompt`); the planner
+    may reuse successful approaches and avoid repeated failures.
+    """
+    experience_section = ""
+    if experience_context and experience_context.strip():
+        experience_section = (
+            "\n"
+            "PAST EXPERIENCE (verified outcomes from earlier runs - reuse "
+            "successful approaches and avoid repeated failures):\n"
+            f"{experience_context.strip()}\n"
+        )
     return (
         "You are the A.S.C.S. planner. Decompose the objective below into a set "
         "of small, coherent, independently-executable tasks.\n"
@@ -220,6 +234,7 @@ def planner_prompt(
         "\n"
         "PROJECT INTELLIGENCE (trust this; it is scan-derived):\n"
         f"{project_intelligence}\n"
+        f"{experience_section}"
         "\n"
         "Rules:\n"
         "- Each task must be ONE coherent unit that can be implemented and "
