@@ -6,7 +6,8 @@ When running the test suite, always **skip tests that require the local
 `qwen3:14b` Ollama model** or a running live Ollama server.
 
 - The live tests are opt-in and gated behind `RISALIVE=1`. They are correctly
-  **skipped by default** (`422 passed, 6 skipped`).
+  **skipped by default** (`448 passed, 5 skipped` on the reference Windows
+  machine; the exact counts vary with platform/plugins).
 - Do **not** set `RISALIVE=1` unless the user explicitly asks for live
   integration testing.
 - Confirm `RISALIVE` is unset in the environment before running `pytest`, and
@@ -19,11 +20,19 @@ opt-in step.
 
 ## Test commands
 
-- Full deterministic suite: `pytest -q` (expect `422 passed, 6 skipped`)
+- Full deterministic suite: `pytest -q` (expect `448 passed, 5 skipped`)
 - Ollama client unit tests: `pytest -q tests/test_ollama.py`
+- Experience-store / pipeline tests: `pytest -q tests/test_experience_pipeline.py`
 - Live smoke (opt-in, requires running Ollama + `qwen3:14b`):
   - bash: `RISALIVE=1 pytest -q tests/test_ollama_live.py`
   - PowerShell: `$env:RISALIVE="1"; pytest -q tests/test_ollama_live.py`
+
+Live-model note: `test_live_ollama_tiny_chat_non_empty` uses a **non-streaming**
+chat with a 30 s client-timeout ceiling. On slower machines the model's
+chain-of-thought can exceed that even when warm; prewarm the model
+(`risa --check` or one short Streaming call) or run the live suite again once
+the model is resident. This is environmental, not a pipeline failure — the ASCS
+CLI always talks to Ollama via streaming.
 
 For the full from-scratch Windows setup, connection, and verification of the
 local `qwen3:14b` model with OpenCode and the ASCS CLI, see

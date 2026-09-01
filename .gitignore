@@ -7,6 +7,11 @@ dist/
 build/
 *.egg-info/
 
+# Personal / local secrets and tool state
+.env
+.opencode/
+node_modules/
+
 # E2E scratch workspace, if ever created inside the repo
 .tmp_workspace/
 .aider*

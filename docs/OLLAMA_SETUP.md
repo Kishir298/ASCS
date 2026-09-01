@@ -21,7 +21,7 @@ differ in: creating the venv, activating it, and omitting the `$env:` prefix
 |---|---|---|
 | Ollama | Download from <https://ollama.com/download/windows> and install. Installs as a background Windows service (auto-starts). | `ollama --version` |
 | OpenCode CLI | Per <https://opencode.ai> install instructions. | `opencode --version` |
-| Python 3.11+ | From python.org or `winget install Python.Python.3.12`. | `py -3 --version` |
+| Python 3.12+ | From python.org or `winget install Python.Python.3.12`. | `py -3 --version` |
 | Git | Optional; used to clone the repo. | `git --version` |
 
 > On Windows the local model store lives at `C:\Users\<you>\.ollama\models`.
@@ -86,6 +86,13 @@ streaming chat).
 
 > `OLLAMA_MODEL` defaults to `qwen3:14b`. If you want a different installed
 > model for the tests, set `OLLAMA_MODEL` in the same shell.
+>
+> `test_live_ollama_tiny_chat_non_empty` is a **non-streaming** chat with a 30 s
+> client-timeout ceiling. On slower machines the model's chain-of-thought can
+> exceed 30 s even when warm; prewarm it (`risa --check` or one short streaming
+> call) or re-run the live suite once the model is resident. The ASCS CLI always
+> talks to Ollama via streaming, so this is an environmental test-suite caveat,
+> not a runtime limitation.
 
 ### 3.3 Configuration knobs
 
@@ -97,12 +104,14 @@ Generation parameters flow **only** to the native Ollama `/api/chat` `options`
 |---|---|---|---|
 | `OLLAMA_BASE_URL` | `--base-url` | `http://localhost:11434` | Ollama server |
 | `OLLAMA_MODEL` | `--model` | `qwen3:14b` | Model id |
-| `OLLAMA_KEEP_ALIVE` | `--keep-alive` | (server default) | e.g. `30m` |
+| `AGENT_KEEP_ALIVE` | `--keep-alive` | `30m` | Keep the model resident, e.g. `30m` |
 | `AGENT_REQUEST_TIMEOUT` | `--request-timeout` | `600` | Per-request budget (s) |
 | `AGENT_NUM_CTX` | `--num-ctx` | `32768` | Context window size |
 | `AGENT_NUM_PREDICT` | `--num-predict` | `8192` | Max tokens generated |
 | `AGENT_MAX_RETRIES` | `--max-retries` | `2` | Retries past 1st attempt |
 | `AGENT_BACKOFF_S` | `--backoff-s` | `2.0` | Base backoff between retries |
+| `AGENT_EXPERIENCE_ENABLED` | — | `true` | Learn from verified runs (see README) |
+| `AGENT_EXPERIENCE_PATH` | — | `~/.risa/ascs/` | Where the experience JSONL store lives |
 
 Example:
 

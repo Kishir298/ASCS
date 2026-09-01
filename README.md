@@ -225,6 +225,28 @@ The agent receives a scan-derived "PROJECT INTELLIGENCE" block in its system
 prompt, so it starts every task knowing the project's shape instead of
 rediscovering it.
 
+## Experience memory
+
+Beyond per-project state, ASCS keeps a cross-project **learning memory**
+(`agent/experience.py`). Every completed run records a structured experience —
+task, outcome, the ordered plan, actions taken, model-visible observations,
+verification result, and a `success`/`score` — to a local JSONL store
+(`~/.risa/ascs/experiences.jsonl` by default).
+
+- **Reuse wins** — on later runs, a short, bounded "PAST EXPERIENCE" block of
+  high-scoring, overlapping prior outcomes is injected into the system prompt
+  and the planner prompt, so the model starts from approaches that already
+  worked instead of rediscovering them.
+- **Avoid repeated failures** — when a run fails, experiences that previously
+  claimed success on the same task are *penalised* (score lowered, floor −1.0),
+  so the model stops trusting an approach that just contradicted it.
+- **Controls** — the CLI enables this by default (`AGENT_EXPERIENCE_ENABLED=true`
+  when launched through `risa`; library callers opt in on `AgentConfig`).
+  Point it elsewhere with `AGENT_EXPERIENCE_PATH`, or disable with
+  `AGENT_EXPERIENCE_ENABLED=false` / `AGENT_EXPERIENCE_ENABLED=0`.
+- **Bounded injection** — only the top few matching experiences (a few KB) are
+  ever sent; the full history stays on disk and is never loaded into context.
+
 ## Task engine
 
 Plans and work items are structured as a dependency-aware **task graph**
@@ -286,7 +308,7 @@ Environment variables (CLI flags win, both override defaults):
 | `AGENT_MAX_ITERATIONS`   | agent iteration budget (→ `TIMEOUT`) | `50`                  |
 | `AGENT_REQUEST_TIMEOUT`  | per-model-call timeout (s)           | `600`                 |
 | `AGENT_COMMAND_TIMEOUT`  | default `run_command` timeout (s)    | `120`                 |
-| `AGENT_KEEP_ALIVE`       | Ollama keep-alive (e.g. `30m`)       | default (Ollama-side) |
+| `AGENT_KEEP_ALIVE`       | Ollama keep-alive (e.g. `30m`)       | `30m`                 |
 | `AGENT_PREWARM`          | warm the model at startup            | on                    |
 | `AGENT_VERBOSE`          | show tool output in CLI logs         | off                   |
 | `AGENT_MAX_OUTPUT_CHARS` | per-tool-output truncation limit     | `20000`               |
@@ -297,6 +319,8 @@ Environment variables (CLI flags win, both override defaults):
 | `AGENT_NUM_PREDICT`      | max tokens generated per request   | `8192`                |
 | `AGENT_MAX_RETRIES`      | retries past the initial attempt   | `2`                   |
 | `AGENT_BACKOFF_S`        | base backoff between retries (s)   | `2.0`                 |
+| `AGENT_EXPERIENCE_ENABLED` | write + reuse experience memory    | `true` (CLI)          |
+| `AGENT_EXPERIENCE_PATH`  | JSONL store for verified outcomes    | `~/.risa/ascs/`       |
 
 The `AGENT_NUM_CTX` / `AGENT_NUM_PREDICT` values are sent **only** to the native
 Ollama `/api/chat` endpoint (as `options`); they are never forwarded to an
