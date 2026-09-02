@@ -18,3 +18,6 @@ node_modules/
 
 # A.S.C.S. runtime state (regenerated on run)
 .ascs/
+
+# macOS
+.DS_Store
