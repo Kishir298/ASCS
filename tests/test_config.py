@@ -52,10 +52,10 @@ def test_default_keep_alive_constant():
     assert DEFAULT_KEEP_ALIVE == "30m"
 
 
-def test_default_model_is_qwen3_14b():
-    # The shipped default must be the documented Qwen3 model, while remaining
-    # overrideable via --model / OLLAMA_MODEL (model-agnostic).
-    assert DEFAULT_MODEL == "qwen3:14b"
+def test_default_model_is_qwen3_coder_30b():
+    # The shipped default must be the documented Qwen3-Coder model (fallback
+    # qwen2.5-coder:14b via --model), while remaining overrideable via --model / OLLAMA_MODEL.
+    assert DEFAULT_MODEL == "qwen3-coder:30b"
 
 
 def test_env_overrides(monkeypatch, tmp_path):

@@ -383,7 +383,7 @@ def chunk_graph(
     graph: TaskGraph,
     *,
     split_at_complexity: str = "large",
-    max_files_per_task: int = 4,
+    max_files_per_task: int = 8,
 ) -> TaskGraph:
     """Automatically split oversized tasks into smaller, coherent subtasks.
 

@@ -362,7 +362,8 @@ def test_context_bundle_contains_file_headers(
 
 
 def test_default_chunk_budget_is_4096() -> None:
-    assert DEFAULT_CHUNK_TOKENS == 4096
+    # Bumped for max-chunking 300k: 8192 (qwen3-coder:30b 65k ctx)
+    assert DEFAULT_CHUNK_TOKENS == 8192
 
 
 def test_empty_query_returns_deterministic_records(

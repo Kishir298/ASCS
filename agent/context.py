@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 
-DEFAULT_CHUNK_TOKENS = 4096
+DEFAULT_CHUNK_TOKENS = 8192  # max-chunking for 300k: 2× prev, each shard still fits 65k ctx
 DEFAULT_STATE_DIR = ".ascs"
 DEFAULT_INDEX_FILE = "context_index.json"
 
@@ -611,7 +611,7 @@ class ProjectIndex:
         self,
         query: str,
         *,
-        limit: int = 12,
+        limit: int = 20,
     ) -> list[FileRecord]:
         """
         Rank project files against a task/query.
@@ -972,7 +972,7 @@ class ProjectIndex:
         task: str,
         *,
         max_tokens: int = DEFAULT_CHUNK_TOKENS,
-        max_files: int = 8,
+        max_files: int = 16,
     ) -> ContextBundle:
         """
         Build a single model-ready context bundle.
@@ -1115,7 +1115,7 @@ class ProjectIndex:
         *,
         level: int = 3,
         max_tokens: int = DEFAULT_CHUNK_TOKENS,
-        max_files: int = 8,
+        max_files: int = 16,
     ) -> ContextBundle:
         """Hierarchical retrieval for a task.
 

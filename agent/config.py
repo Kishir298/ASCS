@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
-DEFAULT_MODEL = "qwen3:14b"
+DEFAULT_MODEL = "qwen3-coder:30b"  # primary 30B coder, fallback qwen2.5-coder:14b via --model
 DEFAULT_REQUEST_TIMEOUT = 600  # seconds; single model request budget
 DEFAULT_KEEP_ALIVE = "30m"  # Ollama model persistence between requests
 DEFAULT_MAX_ITERATIONS = 50
@@ -45,8 +45,9 @@ DEFAULT_UI_HOST = "127.0.0.1"
 DEFAULT_UI_PORT = 8787
 
 # Qwen3 generation knobs (sent to the native Ollama endpoint as options).
-DEFAULT_NUM_CTX = 32768  # context window size
-DEFAULT_NUM_PREDICT = 8192  # max tokens generated per request
+# Bumped for qwen3-coder:30b (262k ctx) — chunking splits 300k tasks into feasible windows.
+DEFAULT_NUM_CTX = 65536  # context window size (30B max feasible on 32GB)
+DEFAULT_NUM_PREDICT = 16384  # max tokens generated per request
 
 # Ollama client retry / backoff policy for transient failures.
 DEFAULT_MAX_RETRIES = 2  # retries after the initial attempt (=3 total attempts)
@@ -64,12 +65,14 @@ DEFAULT_THEME = "auto"
 THEMES = ("auto", "light", "dark")
 
 # Intelligence tier -> (num_ctx, num_predict, context_budget_chars, retrieve_level)
+# Max-chunking for 300k-token tasks: larger windows + higher budgets; default===high
+# (fallback qwen2.5-coder:14b still works via low/medium tiers on 16GB)
 INTELLIGENCE_MAP: dict[str, tuple[int, int, int, int]] = {
     "low": (8192, 2048, 30000, 1),
     "medium": (16384, 4096, 50000, 2),
-    "high": (32768, 8192, 70000, 3),
-    "xhigh": (65536, 16384, 100000, 4),
-    "default": (32768, 8192, 70000, 2),
+    "high": (65536, 16384, 90000, 3),
+    "xhigh": (131072, 32768, 140000, 4),
+    "default": (65536, 16384, 90000, 3),
 }
 
 # Tools that modify the workspace / run arbitrary commands. In PLAN mode these

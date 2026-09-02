@@ -28,7 +28,8 @@ COMPLEXITIES = ("small", "medium", "large")
 KINDS = ("plan", "inspect", "implement", "verify", "review")
 
 # A huge task is one the model flags as needing broad changes; we re-split it.
-MAX_FILES_BEFORE_SPLIT = 3
+# Max-chunking: 8 allows 300k tasks to fan-out into many feasible subtasks
+MAX_FILES_BEFORE_SPLIT = 8
 
 _PLACEHOLDER_RE = re.compile(
     r"^(no (explicit )?plan|none|n/?a|tbd|placeholder|not provided|todo)$",
@@ -273,9 +274,9 @@ def project_intelligence(store: ProjectStore, objective: str) -> str:
         try:
             bundle = store.index.retrieve(
                 objective,
-                level=2,
-                max_tokens=1_600,
-                max_files=8,
+                level=3,
+                max_tokens=4_096,
+                max_files=12,
             )
             if bundle.chunks:
                 lines.append("\nRelevant files:")
