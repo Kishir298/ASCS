@@ -29,6 +29,9 @@ def test_defaults(monkeypatch, tmp_path):
         "AGENT_EXPERIENCE_PATH",
     ):
         monkeypatch.delenv(name, raising=False)
+    # Isolate persisted TUI state (host ~/.risa/ascs/tui_state.json may contain
+    # a fallback model like qwen2.5-coder:14b which would override DEFAULT_MODEL).
+    monkeypatch.setenv("AGENT_TUI_STATE_PATH", str(tmp_path / "tui_state.json"))
     cfg = load_config(workspace=str(tmp_path))
     assert cfg.ollama_base_url == DEFAULT_OLLAMA_BASE_URL
     assert cfg.model == DEFAULT_MODEL
