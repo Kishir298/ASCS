@@ -1,7 +1,7 @@
 """Configuration for the coding agent.
 
 Resolution order (highest wins):
-    explicit CLI overrides -> environment variables -> defaults.
+    explicit CLI overrides -> environment variables -> TUI persisted state -> defaults.
 
 No Python source edits are required to change configuration.
 
@@ -19,10 +19,19 @@ The agent supports three primary user modes:
 ``SAFE`` is retained as a backward-compatible *approval overlay* on top of the
 primary modes: when enabled, modification/command tools prompt the operator
 for approval before running.
+
+Provider & Intelligence
+=======================
+``provider`` selects the model host (``ollama`` always available, plus
+``openai``, ``anthropic``, ``grok``, ``google``, ``deepseek``). ``intelligence``
+is a tier that controls the generation budget (``num_ctx``, ``num_predict``,
+``context_budget_chars`` and the retrieval depth). ``theme`` controls the TUI
+appearance (``auto``/``light``/``dark``).
 """
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,6 +54,23 @@ DEFAULT_BACKOFF_S = 2.0
 
 # The three user-facing modes.
 MODES = ("PLAN", "BUILD", "AUTO")
+
+# Provider and intelligence.
+PROVIDER_NAMES = ("ollama", "openai", "anthropic", "grok", "google", "deepseek")
+DEFAULT_PROVIDER = "ollama"
+INTELLIGENCE_LEVELS = ("low", "medium", "high", "xhigh", "default")
+DEFAULT_INTELLIGENCE = "default"
+DEFAULT_THEME = "auto"
+THEMES = ("auto", "light", "dark")
+
+# Intelligence tier -> (num_ctx, num_predict, context_budget_chars, retrieve_level)
+INTELLIGENCE_MAP: dict[str, tuple[int, int, int, int]] = {
+    "low": (8192, 2048, 30000, 1),
+    "medium": (16384, 4096, 50000, 2),
+    "high": (32768, 8192, 70000, 3),
+    "xhigh": (65536, 16384, 100000, 4),
+    "default": (32768, 8192, 70000, 2),
+}
 
 # Tools that modify the workspace / run arbitrary commands. In PLAN mode these
 # are removed from the enabled set; in SAFE mode they are gated behind
@@ -82,6 +108,9 @@ class AgentConfig:
     workspace: Path = Path.cwd()
     ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
     model: str = DEFAULT_MODEL
+    provider: str = DEFAULT_PROVIDER  # ollama | openai | anthropic | grok | google | deepseek
+    intelligence: str = DEFAULT_INTELLIGENCE  # low | medium | high | xhigh | default
+    theme: str = DEFAULT_THEME  # auto | light | dark
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     mode: str = "AUTO"  # PLAN, BUILD or AUTO (SAFE accepted as overlay)
     approval: bool = False  # True -> prompt before modifications/commands
@@ -154,6 +183,11 @@ class AgentConfig:
             names = tuple(n for n in names if n not in PLAN_MODE_BLOCKED)
         return names
 
+    @property
+    def retrieve_level(self) -> int:
+        """Context retrieval depth derived from intelligence tier."""
+        return INTELLIGENCE_MAP.get(self.intelligence, INTELLIGENCE_MAP[DEFAULT_INTELLIGENCE])[3]
+
 
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
@@ -200,24 +234,177 @@ def _env_float(name: str, default: float) -> float:
     return value
 
 
+# ---------------------------------------------------------------------------
+# TUI persistence helpers
+# ---------------------------------------------------------------------------
+
+def tui_state_path() -> Path:
+    """Path to the persisted TUI state (provider/model/intelligence/theme).
+
+    Overridable via ``AGENT_TUI_STATE_PATH`` for testing.
+    """
+    custom = os.environ.get("AGENT_TUI_STATE_PATH", "").strip()
+    if custom:
+        return Path(custom).expanduser()
+    return Path.home() / ".risa" / "ascs" / "tui_state.json"
+
+
+def load_tui_state(path: Path | None = None) -> dict:
+    """Load persisted TUI state; never raises, returns {} on failure."""
+    p = path or tui_state_path()
+    try:
+        if not p.exists():
+            return {}
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def save_tui_state(state: dict, path: Path | None = None) -> None:
+    """Persist TUI state atomically. Creates parent dirs, 0o600 best-effort."""
+    p = path or tui_state_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        # Merge with existing to avoid clobbering concurrent provider configs
+        try:
+            existing = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+            if not isinstance(existing, dict):
+                existing = {}
+        except Exception:
+            existing = {}
+        merged = {**existing, **state}
+        tmp.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+        try:
+            tmp.chmod(0o600)
+        except Exception:
+            pass
+        os.replace(tmp, p)
+        try:
+            p.chmod(0o600)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def intelligence_values(level: str) -> tuple[int, int, int, int]:
+    """Return (num_ctx, num_predict, context_budget, retrieve_level) for level."""
+    lvl = (level or DEFAULT_INTELLIGENCE).strip().lower()
+    return INTELLIGENCE_MAP.get(lvl, INTELLIGENCE_MAP[DEFAULT_INTELLIGENCE])
+
+
+def _apply_intelligence_defaults(kwargs: dict, level: str) -> None:
+    """Fill num_ctx / num_predict / context_budget from intelligence tier
+    only when caller has not already set them (CLI/env wins)."""
+    lvl = (level or DEFAULT_INTELLIGENCE).strip().lower()
+    if lvl not in INTELLIGENCE_MAP:
+        lvl = DEFAULT_INTELLIGENCE
+    n_ctx, n_pred, c_budget, _ = INTELLIGENCE_MAP[lvl]
+    # Only fill if not already provided via env/CLI (kwargs already contains env defaults,
+    # but we want intelligence to override the bare defaults only when env didn't set them).
+    # To detect env override we check whether env var was set.
+    if "AGENT_NUM_CTX" not in os.environ and "num_ctx" not in kwargs:
+        kwargs["num_ctx"] = n_ctx
+    elif lvl != DEFAULT_INTELLIGENCE and "AGENT_NUM_CTX" not in os.environ and kwargs.get("num_ctx") == DEFAULT_NUM_CTX:
+        # If env not set but kwargs has default value, allow intelligence to override
+        # unless caller explicitly passed num_ctx via overrides (handled after).
+        pass  # will be handled below with explicit check
+    # Simpler: if AGENT_NUM_CTX env not set, apply intelligence value unconditionally
+    # unless overrides already contains num_ctx from CLI.
+    # We do this by checking if num_ctx was provided explicitly in overrides later,
+    # so for now just set if env not present.
+    if "AGENT_NUM_CTX" not in os.environ:
+        # will be overridden by kwargs.update(overrides) if CLI set it, so safe to set now
+        kwargs["num_ctx"] = n_ctx
+    if "AGENT_NUM_PREDICT" not in os.environ:
+        kwargs["num_predict"] = n_pred
+    if "AGENT_CONTEXT_BUDGET_CHARS" not in os.environ:
+        kwargs["context_budget_chars"] = c_budget
+
+
 def load_config(**overrides) -> AgentConfig:
     """Build an AgentConfig from environment variables and explicit overrides.
 
     ``overrides`` keys map directly to ``AgentConfig`` field names. Explicit
-    values always win over the environment.
+    values always win over the environment, which wins over the persisted TUI
+    state, which wins over defaults.
     """
-    mode_raw = os.environ.get("AGENT_MODE", "AUTO").strip().upper()
+    # Load persisted TUI state for fallback defaults (provider/model/intelligence/theme).
+    persisted = load_tui_state()
+
+    mode_raw = os.environ.get("AGENT_MODE", persisted.get("mode", "AUTO")).strip().upper()
+    # Allow persisted mode to be overridden by env; default AUTO.
     if mode_raw not in (*MODES, "SAFE"):
         raise ValueError(
             f"AGENT_MODE must be one of {', '.join(MODES)} or SAFE, got {mode_raw!r}"
         )
 
+    # Provider / intelligence / theme: env > persisted > default
+    provider_raw = os.environ.get("AGENT_PROVIDER", persisted.get("provider", DEFAULT_PROVIDER)).strip().lower()
+    if provider_raw not in PROVIDER_NAMES:
+        # Don't crash on old persisted values; fall back
+        provider_raw = DEFAULT_PROVIDER
+    intelligence_raw = os.environ.get("AGENT_INTELLIGENCE", persisted.get("intelligence", DEFAULT_INTELLIGENCE)).strip().lower()
+    if intelligence_raw not in INTELLIGENCE_LEVELS:
+        intelligence_raw = DEFAULT_INTELLIGENCE
+    theme_raw = os.environ.get("AGENT_THEME", persisted.get("theme", DEFAULT_THEME)).strip().lower()
+    if theme_raw not in THEMES:
+        theme_raw = DEFAULT_THEME
+
     # SAFE is a legacy approval overlay; approval is derived from it unless
     # explicitly overridden.
     approval_raw = _env_bool("AGENT_APPROVAL", mode_raw == "SAFE" or False)
+
+    # Intelligence tier influences generation knobs. We resolve it before
+    # filling num_ctx etc so env-provided num_ctx still wins.
+    intel_n_ctx, intel_n_pred, intel_c_budget, _ = intelligence_values(intelligence_raw)
+
+    # Determine base kwargs from env (with intelligence-aware defaults where env not set)
+    # For num_ctx etc we want: if env sets them, use env; else use intelligence values.
+    if "AGENT_NUM_CTX" in os.environ:
+        num_ctx_val = _env_int("AGENT_NUM_CTX", DEFAULT_NUM_CTX)
+    else:
+        # Check persisted num_ctx if present and intelligence not explicitly changed via env
+        if "num_ctx" in persisted and intelligence_raw == persisted.get("intelligence", DEFAULT_INTELLIGENCE):
+            try:
+                num_ctx_val = int(persisted["num_ctx"])
+            except Exception:
+                num_ctx_val = intel_n_ctx
+        else:
+            num_ctx_val = intel_n_ctx
+
+    if "AGENT_NUM_PREDICT" in os.environ:
+        num_pred_val = _env_int("AGENT_NUM_PREDICT", DEFAULT_NUM_PREDICT)
+    else:
+        if "num_predict" in persisted and intelligence_raw == persisted.get("intelligence", DEFAULT_INTELLIGENCE):
+            try:
+                num_pred_val = int(persisted["num_predict"])
+            except Exception:
+                num_pred_val = intel_n_pred
+        else:
+            num_pred_val = intel_n_pred
+
+    if "AGENT_CONTEXT_BUDGET_CHARS" in os.environ:
+        c_budget_val = _env_int("AGENT_CONTEXT_BUDGET_CHARS", 70_000)
+    else:
+        if "context_budget_chars" in persisted and intelligence_raw == persisted.get("intelligence", DEFAULT_INTELLIGENCE):
+            try:
+                c_budget_val = int(persisted["context_budget_chars"])
+            except Exception:
+                c_budget_val = intel_c_budget
+        else:
+            c_budget_val = intel_c_budget
+
     kwargs = {
-        "ollama_base_url": _env_str("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
-        "model": _env_str("OLLAMA_MODEL", DEFAULT_MODEL),
+        "ollama_base_url": _env_str("OLLAMA_BASE_URL", persisted.get("ollama_base_url", DEFAULT_OLLAMA_BASE_URL)),
+        "model": _env_str("OLLAMA_MODEL", persisted.get("model", DEFAULT_MODEL)),
+        "provider": provider_raw,
+        "intelligence": intelligence_raw,
+        "theme": theme_raw,
         "max_iterations": _env_int("AGENT_MAX_ITERATIONS", DEFAULT_MAX_ITERATIONS),
         "mode": mode_raw,
         "approval": approval_raw,
@@ -226,12 +413,12 @@ def load_config(**overrides) -> AgentConfig:
         "request_timeout": _env_int("AGENT_REQUEST_TIMEOUT", DEFAULT_REQUEST_TIMEOUT),
         "keep_alive": _env_str("AGENT_KEEP_ALIVE", DEFAULT_KEEP_ALIVE) or None,
         "prewarm": _env_bool("AGENT_PREWARM", True),
-        "num_ctx": _env_int("AGENT_NUM_CTX", DEFAULT_NUM_CTX),
-        "num_predict": _env_int("AGENT_NUM_PREDICT", DEFAULT_NUM_PREDICT),
+        "num_ctx": num_ctx_val,
+        "num_predict": num_pred_val,
         "max_retries": _env_int("AGENT_MAX_RETRIES", DEFAULT_MAX_RETRIES),
         "backoff_s": _env_float("AGENT_BACKOFF_S", DEFAULT_BACKOFF_S),
         "max_output_chars": _env_int("AGENT_MAX_OUTPUT_CHARS", 20_000),
-        "context_budget_chars": _env_int("AGENT_CONTEXT_BUDGET_CHARS", 70_000),
+        "context_budget_chars": c_budget_val,
         "malformed_retry_limit": _env_int("AGENT_MALFORMED_RETRY_LIMIT", 5),
         "max_verify_retries": _env_int("AGENT_MAX_VERIFY_RETRIES", 2),
         "experience_enabled": _env_bool("AGENT_EXPERIENCE_ENABLED", True),
@@ -240,6 +427,20 @@ def load_config(**overrides) -> AgentConfig:
         "ui_port": _env_int("AGENT_UI_PORT", DEFAULT_UI_PORT),
     }
     kwargs.update(overrides)
+
+    # If intelligence was overridden explicitly, recompute generation knobs
+    # unless the caller also explicitly set those knobs or env did.
+    if "intelligence" in overrides:
+        new_intel = overrides["intelligence"]
+        if isinstance(new_intel, str) and new_intel.strip().lower() in INTELLIGENCE_MAP:
+            new_intel = new_intel.strip().lower()
+            n_ctx, n_pred, c_budget, _ = INTELLIGENCE_MAP[new_intel]
+            if "num_ctx" not in overrides and "AGENT_NUM_CTX" not in os.environ:
+                kwargs["num_ctx"] = n_ctx
+            if "num_predict" not in overrides and "AGENT_NUM_PREDICT" not in os.environ:
+                kwargs["num_predict"] = n_pred
+            if "context_budget_chars" not in overrides and "AGENT_CONTEXT_BUDGET_CHARS" not in os.environ:
+                kwargs["context_budget_chars"] = c_budget
 
     if "workspace" in kwargs:
         kwargs["workspace"] = Path(kwargs["workspace"]).expanduser()
@@ -255,6 +456,18 @@ def _validate(config: AgentConfig) -> None:
     if config.mode.upper() not in (*MODES, "SAFE"):
         raise ValueError(
             f"mode must be one of {', '.join(MODES)} or SAFE, got {config.mode!r}"
+        )
+    if config.provider not in PROVIDER_NAMES:
+        raise ValueError(
+            f"provider must be one of {', '.join(PROVIDER_NAMES)}, got {config.provider!r}"
+        )
+    if config.intelligence not in INTELLIGENCE_LEVELS:
+        raise ValueError(
+            f"intelligence must be one of {', '.join(INTELLIGENCE_LEVELS)}, got {config.intelligence!r}"
+        )
+    if config.theme not in THEMES:
+        raise ValueError(
+            f"theme must be one of {', '.join(THEMES)}, got {config.theme!r}"
         )
     if not config.workspace.exists():
         raise ValueError(f"Workspace does not exist: {config.workspace}")

@@ -18,11 +18,17 @@ import sys
 
 from . import __version__
 from .config import (
+    DEFAULT_INTELLIGENCE,
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_BASE_URL,
+    DEFAULT_PROVIDER,
+    DEFAULT_THEME,
     DEFAULT_UI_HOST,
     DEFAULT_UI_PORT,
+    INTELLIGENCE_LEVELS,
     MODES,
+    PROVIDER_NAMES,
+    THEMES,
     AgentConfig,
     load_config,
 )
@@ -153,6 +159,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Base backoff seconds between Ollama request retries (default: 2.0).",
     )
     parser.add_argument(
+        "--provider",
+        default=None,
+        choices=list(PROVIDER_NAMES),
+        help=f"Model provider (default: {DEFAULT_PROVIDER}). All providers are Ollama-compatible.",
+    )
+    parser.add_argument(
+        "--intelligence",
+        "--intel",
+        dest="intelligence",
+        default=None,
+        choices=list(INTELLIGENCE_LEVELS),
+        help=f"Intelligence tier: low/medium/high/xhigh/default (default: {DEFAULT_INTELLIGENCE}). "
+        "Controls num_ctx/num_predict and retrieval depth.",
+    )
+    parser.add_argument(
+        "--theme",
+        default=None,
+        choices=list(THEMES),
+        help=f"TUI theme: auto/light/dark (default: {DEFAULT_THEME}).",
+    )
+    parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="Start the interactive TUI (chatbox, TAB for mode, /models /connect /intel).",
+    )
+    parser.add_argument(
         "--ui",
         action="store_true",
         help="Start the local web UI instead of a one-shot session.",
@@ -210,6 +242,9 @@ def build_config(args: argparse.Namespace) -> "AgentConfig":
         ("backoff_s", args.backoff_s),
         ("ui_host", args.host),
         ("ui_port", args.port),
+        ("provider", args.provider),
+        ("intelligence", args.intelligence),
+        ("theme", args.theme),
     ):
         if value is not None:
             overrides[key] = value
@@ -253,6 +288,10 @@ def main(argv: list[str] | None = None) -> int:
     # -- web UI mode --------------------------------------------------------
     if args.ui:
         return _cmd_ui(config, client)
+
+    # -- TUI mode -----------------------------------------------------------
+    if args.tui:
+        return _cmd_tui(config, client)
 
     # -- preflight connectivity --------------------------------------------
     from .boot import boot
@@ -403,6 +442,17 @@ def _cmd_doctor(config) -> int:
     report = doctor(workspace=config.workspace)
     print_doctor(report)
     return 0 if report.ok else 1
+
+
+def _cmd_tui(config, client) -> int:
+    """Start the interactive TUI."""
+    try:
+        from .tui import run_tui  # type: ignore
+    except Exception as exc:
+        _print_error(f"TUI unavailable: {exc}")
+        return 1
+    # TUI handles its own boot / missing curses internally (fallback)
+    return run_tui(config, client)
 
 
 if __name__ == "__main__":
