@@ -696,20 +696,21 @@ class TuiApp:
                 self.input_text = self.input_text[:-1]
                 self.cursor_pos = len(self.input_text)
             return False
-        # Delete
-        if HAS_CURSES and ch == curses.KEY_DC:
+        # Delete (330 = KEY_DC)
+        if ch == 330 or (HAS_CURSES and ch == curses.KEY_DC):
             if 0 <= self.cursor_pos < len(self.input_text):
                 self.input_text = self.input_text[: self.cursor_pos] + self.input_text[self.cursor_pos + 1 :]
             return False
-        # Left/Right
-        if HAS_CURSES and ch == curses.KEY_LEFT:
+        # Left/Right (260/261) — handle even without curses for testability
+        if ch == 260 or (HAS_CURSES and ch == curses.KEY_LEFT):
             if self.cursor_pos > 0:
                 self.cursor_pos -= 1
             return False
-        if HAS_CURSES and ch == curses.KEY_RIGHT:
+        if ch == 261 or (HAS_CURSES and ch == curses.KEY_RIGHT):
             if self.cursor_pos < len(self.input_text):
                 self.cursor_pos += 1
             return False
+        # Up/Down not used in input (handled by picker)
         # Printable
         if 32 <= ch <= 126:
             c = chr(ch)
