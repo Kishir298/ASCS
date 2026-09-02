@@ -26,7 +26,7 @@ real STOP/cancellation.
   runtime satisfies the requirement.
 - [Ollama](https://ollama.com) running locally (`ollama serve`, default
   `http://localhost:11434`)
-- A code model, e.g. `ollama pull qwen3:14b` (the default model)
+- A code model, e.g. `ollama pull qwen3-coder:30b` (the default model, 30B coder ~19 GB; fallback `ollama pull qwen2.5-coder:14b` for 16 GB)
 
 ## Install (Windows PowerShell)
 
@@ -66,8 +66,7 @@ venv to run `risa`.
 > activating the environment, as long as `.venv` has been created and
 > `requirements.txt` installed.
 
-The default model is `qwen3:14b`. Override it per run with
-`--model`, or set any model via environment variables (see Configuration).
+The default model is `qwen3-coder:30b` (fallback `qwen2.5-coder:14b` for 16 GB via `--model`/`OLLAMA_MODEL`). Override per run with `--model`, or set any model via environment variables (see Configuration).
 
 ## Quick start
 
@@ -304,7 +303,7 @@ Environment variables (CLI flags win, both override defaults):
 | `AGENT_APPROVAL`         | in SAFE mode, auto-approve all       | off (ask each time)   |
 | `AGENT_UI_HOST` / `AGENT_UI_PORT` | web UI bind address / port | `127.0.0.1` / `8787` |
 | `OLLAMA_BASE_URL`        | Ollama server URL                    | `http://localhost:11434` |
-| `OLLAMA_MODEL`           | Ollama model                         | `qwen3:14b`   |
+| `OLLAMA_MODEL`           | Ollama model                         | `qwen3-coder:30b` (fallback `qwen2.5-coder:14b`) |
 | `AGENT_MAX_ITERATIONS`   | agent iteration budget (→ `TIMEOUT`) | `50`                  |
 | `AGENT_REQUEST_TIMEOUT`  | per-model-call timeout (s)           | `600`                 |
 | `AGENT_COMMAND_TIMEOUT`  | default `run_command` timeout (s)    | `120`                 |
@@ -315,8 +314,8 @@ Environment variables (CLI flags win, both override defaults):
 | `AGENT_CONTEXT_BUDGET_CHARS` | rolling conversation budget      | `70000`               |
 | `AGENT_MALFORMED_RETRY_LIMIT` | bad-reply retries before `FAILED` | `5`               |
 | `AGENT_MAX_VERIFY_RETRIES` | verification failure retries per task | `2`           |
-| `AGENT_NUM_CTX`          | Qwen3 context window size          | `32768`               |
-| `AGENT_NUM_PREDICT`      | max tokens generated per request   | `8192`                |
+| `AGENT_NUM_CTX`          | Qwen3 context window size (max-chunking: 65k default, 131k xhigh for 300k shards) | `65536`               |
+| `AGENT_NUM_PREDICT`      | max tokens generated per request   | `16384`               |
 | `AGENT_MAX_RETRIES`      | retries past the initial attempt   | `2`                   |
 | `AGENT_BACKOFF_S`        | base backoff between retries (s)   | `2.0`                 |
 | `AGENT_EXPERIENCE_ENABLED` | write + reuse experience memory    | `true` (CLI)          |
@@ -325,7 +324,7 @@ Environment variables (CLI flags win, both override defaults):
 The `AGENT_NUM_CTX` / `AGENT_NUM_PREDICT` values are sent **only** to the native
 Ollama `/api/chat` endpoint (as `options`); they are never forwarded to an
 OpenAI-compatible endpoint. See `docs/OLLAMA_SETUP.md` for the full local-model
-setup and verification, including the OpenCode `ollama/qwen3:14b` config.
+setup and verification, including the OpenCode `ollama/qwen3-coder:30b` + fallback `qwen2.5-coder:14b` config. Max-chunking splits a 300k-token objective into feasible `~8k` shards within the 65k window.
 
 ## Development
 
@@ -338,7 +337,7 @@ python -m pytest
 
 All tests run offline against scripted fake clients and an in-process mock
 Ollama server — **no Ollama required**. The skipped tests are the opt-in live
-checks that need a real local `qwen3:14b` and a running Ollama server,
+checks that need a real local `qwen3-coder:30b` (or `qwen2.5-coder:14b` fallback) and a running Ollama server,
 gated behind `RISALIVE=1`:
 
 ```powershell
@@ -346,9 +345,9 @@ $env:RISALIVE="1"; pytest -q tests/test_ollama_live.py   # bash: RISALIVE=1 pyte
 $env:RISALIVE=""
 ```
 
-On a machine with a running Ollama and `qwen3:14b` installed these take
-minutes; otherwise they skip. See `docs/OLLAMA_SETUP.md` for the full Windows
-setup and verification.
+On a machine with a running Ollama and `qwen3-coder:30b` installed these take
+minutes; otherwise they skip (use `--model qwen2.5-coder:14b` on 16GB). See `docs/OLLAMA_SETUP.md` for the full Windows
+setup and verification (32 GB recommended for 30B; 300k tasks rely on max-chunking).
 
 Test suite covers the tool layer, the loop's lifecycle/plan/mode/cancellation
 behaviour (using scripted fake clients — no Ollama required), event emission,
