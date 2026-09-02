@@ -6,7 +6,7 @@ When running the test suite, always **skip tests that require the local
 `qwen3:14b` Ollama model** or a running live Ollama server.
 
 - The live tests are opt-in and gated behind `RISALIVE=1`. They are correctly
-  **skipped by default** (`450 passed, 5 skipped` on the reference Windows
+  **skipped by default** (`464 passed, 5 skipped` on the reference Windows
   machine; the exact counts vary with platform/plugins).
 - Do **not** set `RISALIVE=1` unless the user explicitly asks for live
   integration testing.
@@ -20,7 +20,7 @@ opt-in step.
 
 ## Test commands
 
-- Full deterministic suite: `pytest -q` (expect `450 passed, 5 skipped`)
+- Full deterministic suite: `pytest -q` (expect `464 passed, 5 skipped`)
 - Ollama client unit tests: `pytest -q tests/test_ollama.py`
 - Experience-store / pipeline tests: `pytest -q tests/test_experience_pipeline.py`
 - Live smoke (opt-in, requires running Ollama + `qwen3:14b`):
