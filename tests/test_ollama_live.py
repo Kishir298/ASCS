@@ -41,7 +41,7 @@ def _client() -> OllamaClient:
     return OllamaClient(
         base_url=LIVE_BASE_URL,
         model=LIVE_MODEL,
-        request_timeout=30,
+        request_timeout=180,
         keep_alive="1m",
     )
 
@@ -65,12 +65,17 @@ def test_live_ollama_model_missing():
 
 
 def test_live_ollama_tiny_chat_non_empty():
-    """A tiny prompt must produce a non-empty assistant response."""
+    """A tiny prompt must produce a non-empty assistant response.
+
+    Note: the per-call ceiling is generous (180 s) because non-streaming
+    generation is CPU-bound on slower machines — a warm ``qwen3:14b`` on a
+    laptop routinely takes 40+ s to finish a short answer here.
+    """
     client = _client()
     out = client.chat(
         [{"role": "user", "content": "Reply with exactly: OPENCODE LOCAL QWEN TEST OK"}],
         format=None,
-        timeout=30,
+        timeout=180,
     )
     assert out.strip(), "chat returned an empty response"
 

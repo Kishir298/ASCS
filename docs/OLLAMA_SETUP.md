@@ -87,12 +87,12 @@ streaming chat).
 > `OLLAMA_MODEL` defaults to `qwen3:14b`. If you want a different installed
 > model for the tests, set `OLLAMA_MODEL` in the same shell.
 >
-> `test_live_ollama_tiny_chat_non_empty` is a **non-streaming** chat with a 30 s
-> client-timeout ceiling. On slower machines the model's chain-of-thought can
-> exceed 30 s even when warm; prewarm it (`risa --check` or one short streaming
-> call) or re-run the live suite once the model is resident. The ASCS CLI always
-> talks to Ollama via streaming, so this is an environmental test-suite caveat,
-> not a runtime limitation.
+> `test_live_ollama_tiny_chat_non_empty` is a **non-streaming** chat with a
+> **180 s** client-timeout ceiling (raised from 30 s to accommodate slow,
+> CPU-bound generation on multi-GB local models; generation is token-rate
+> limited, not a failure). `chat_stream` is exercised by the other live tests,
+> but the agent loop's primary request path is non-streaming
+> `chat_resilient`.
 
 ### 3.3 Configuration knobs
 

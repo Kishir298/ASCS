@@ -119,6 +119,70 @@ def test_task_failure_marks_partial_and_cancels_dependents(tmp_path):
     assert "T2" in execution.summary
 
 
+def _task_graph_single():
+    return build_graph_from_specs(
+        [{"id": "T1", "title": "Do the thing", "dependencies": []}]
+    )
+
+
+class _EmptyOnceClient:
+    """Emits one empty assistant response, then a valid ``done`` reply."""
+
+    def __init__(self, always_empty: bool = False) -> None:
+        self.always_empty = always_empty
+        self.calls = 0
+
+    def chat(self, messages, **kwargs) -> str:
+        self.calls += 1
+        if self.always_empty or self.calls == 1:
+            from agent.ollama import OllamaResponseError
+
+            raise OllamaResponseError("Ollama returned an empty assistant response")
+        return json.dumps({"done": True, "summary": "all good"})
+
+
+def test_run_task_recovers_from_empty_model_reply(tmp_path):
+    """An empty/think-only reply must not kill the task: nudge and retry."""
+    client = _EmptyOnceClient()
+    config = AgentConfig(workspace=tmp_path, mode="AUTO")
+    ws = Workspace(tmp_path)
+    executor = TaskExecutor(
+        config=config,
+        client=client,
+        workspace=ws,
+        store=ProjectStore(tmp_path),
+        event_sink=None,
+        log=lambda m: None,
+        verify=_pass_verify,
+    )
+    execution = executor.execute("job", _task_graph_single())
+    assert client.calls == 2
+    assert execution.is_success
+    assert execution.outcomes[0].ok
+    assert not execution.outcomes[0].reason
+
+
+def test_run_task_gives_up_after_repeatedly_empty_replies(tmp_path):
+    """Constant empty replies are bounded by the malformed-retry limit."""
+    client = _EmptyOnceClient(always_empty=True)
+    config = AgentConfig(
+        workspace=tmp_path, mode="AUTO", malformed_retry_limit=3
+    )
+    ws = Workspace(tmp_path)
+    executor = TaskExecutor(
+        config=config,
+        client=client,
+        workspace=ws,
+        store=ProjectStore(tmp_path),
+        event_sink=None,
+        log=lambda m: None,
+    )
+    execution = executor.execute("job", _task_graph_single())
+    assert client.calls == 3
+    assert execution.status == "partial"
+    assert "unusable responses" in (execution.outcomes[0].reason or "")
+
+
 def test_fan_in_fan_out_graph(tmp_path):
     executor = _make(tmp_path, started=_ok, verify=_pass_verify)
     graph = build_graph_from_specs(

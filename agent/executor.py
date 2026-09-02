@@ -40,7 +40,7 @@ from .events import (
     null_sink,
 )
 from .models import ToolResult, parse_model_reply, tool_result_message
-from .ollama import OllamaClient, OllamaError, resilient_chat
+from .ollama import OllamaClient, OllamaError, OllamaResponseError, resilient_chat
 from .prompts import system_prompt
 from .tasks import COMPLETED, FAILED, PENDING, READY, RUNNING, SKIPPED, Task, TaskGraph
 from .tools import execute_tool
@@ -582,6 +582,7 @@ class TaskExecutor:
         ]
         outcome = TaskOutcome(task_id=task.id)
         action_log: list[TaskActionLog] = []
+        malformed = 0
 
         for iteration in range(1, self.config.max_iterations + 1):
             if self.should_stop():
@@ -596,6 +597,21 @@ class TaskExecutor:
                     format="json",
                     should_stop=self.should_stop,
                 )
+            except OllamaResponseError as exc:
+                # Empty/think-only replies are recoverable with a nudge, just
+                # like in the single-shot loop; give up after a bounded budget.
+                malformed += 1
+                if malformed >= self.config.malformed_retry_limit:
+                    outcome.ok = False
+                    outcome.reason = (
+                        f"model error: {exc} "
+                        f"(after {malformed} unusable responses)"
+                    )
+                    outcome.action_log = action_log
+                    return outcome
+                messages.append({"role": "assistant", "content": f"(empty/invalid response: {exc})"})
+                messages.append({"role": "user", "content": _RETRY_PROMPT})
+                continue
             except OllamaError as exc:
                 outcome.ok = False
                 outcome.reason = f"model error: {exc}"
@@ -762,6 +778,12 @@ def _exit_code(result: ToolResult) -> int:
         return -1
     m = re.search(r"exit code (\d+)", result.note or "")
     return int(m.group(1)) if m else (0 if result.ok else 1)
+
+
+_RETRY_PROMPT = (
+    "The model returned an unusable response. Reply with ONLY a valid JSON "
+    "tool call or done object as instructed."
+)
 
 
 def _trim_for_request(messages: list[dict[str, str]], budget: int) -> list[dict[str, str]]:
