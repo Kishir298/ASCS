@@ -4,10 +4,11 @@ Features (spec-driven):
   - TAB cycles Plan(orange) -> Build(blue) -> Auto(red)
   - /models  -> provider-aware model picker (bold provider, pink highlight)
   - /connect -> provider connector (local + cloud)
-  - /intel   -> low/medium/high/xhigh/default  -> (num_ctx, num_predict, budget, level)
+  - /intel   -> low/medium/high/xhigh/default  -> (num_ctx, num_predict, budget, level) + picker
   - Chatbox rectangle sized for: "Hello, hello, hello, hello, hello, hello, hello, hello, hello"
   - Theme-aware (auto/light/dark) black/white bg, contrast input, slightly offset chatbox
-  - Minimised layout when terminal shrinks
+  - Responsive tiers: large/medium/small/minimised + extremely-small guard
+  - Full-screen application model, composer anchored bottom, output area flexible
   - Persistence across restarts via tui_state.json
 
 Output area is placeholder per spec (deferred).
@@ -43,11 +44,10 @@ from .config import (
 # ---------------------------------------------------------------------------
 
 HELLO_TEXT = "Hello, hello, hello, hello, hello, hello, hello, hello, hello"
-# Minimum inner width must fit HELLO_TEXT exactly (63 chars) + 2 padding on each side for nice border spacing.
-# Spec: big enough to show exactly this text => inner >= len(HELLO_TEXT)
-HELLO_LEN = len(HELLO_TEXT)  # 63
-MIN_CHATBOX_INNER_W = HELLO_LEN  # 63
-MIN_CHATBOX_W = MIN_CHATBOX_INNER_W + 2  # 65 inc borders
+# HELLO_TEXT is 61 chars (verified). Inner must be >= len(HELLO_TEXT).
+HELLO_LEN = len(HELLO_TEXT)  # 61
+MIN_CHATBOX_INNER_W = HELLO_LEN  # 61
+MIN_CHATBOX_W = MIN_CHATBOX_INNER_W + 2  # 63 inc borders
 MIN_CHATBOX_H = 5  # at least 3 content lines + 2 borders
 MIN_TERM_W = 40
 MIN_TERM_H = 10
@@ -64,6 +64,8 @@ PINK_BG_IDX = 213  # pink highlight (approx #FF87D7) — any pink in 200-219 ran
 PINK_FG_IDX = 16  # black text on pink for contrast, alternative white handled in drawing
 
 INTEL_CHOICES = ("low", "medium", "high", "xhigh", "default")
+# Display order for picker per spec: default, low, medium, high, xhigh
+INTEL_DISPLAY_ORDER = ("default", "low", "medium", "high", "xhigh")
 
 # Try to import curses optionally.
 try:
@@ -94,14 +96,44 @@ def format_model_footer(model: str, intelligence: str) -> str:
     return f"{model}({intelligence})"
 
 
+def get_layout_tier(term_h: int, term_w: int) -> str:
+    """Return responsive tier for given terminal size.
+
+    Tiers:
+      extremely_small: w<40 or h<10  -> can't render safely, show guard message
+      minimised: w<50 or h<12        -> compact fallback (mode+input only)
+      compact: 50<=w<70             -> reduced margins, shortened labels
+      normal: 70<=w<100 or 12<=h<24  -> standard
+      large: 100<=w<140             -> full interface
+      wide: w>=140                  -> centered with side breathing room
+    """
+    if term_w < MIN_TERM_W or term_h < MIN_TERM_H:
+        return "extremely_small"
+    if term_h < 12 or term_w < 50:
+        return "minimised"
+    if term_w < 70:
+        return "compact"
+    if term_w < 100:
+        return "normal"
+    if term_w < 140:
+        return "large"
+    return "wide"
+
+
 def calc_chatbox_geometry(term_h: int, term_w: int) -> dict[str, int]:
     """Return geometry for chatbox given terminal size.
 
     Returns dict with keys: chat_h, chat_w, chat_y, chat_x, is_minimised, inner_w, inner_h
+    Plus tier-aware extensions: tier, too_small
+
+    Responsive tiers are encoded in tier field; is_minimised stays binary for
+    backward compatibility (extremely_small also counts as minimised).
     """
-    is_min = term_h < 12 or term_w < 50
+    tier = get_layout_tier(term_h, term_w)
+    is_min = 1 if tier in ("minimised", "extremely_small") else 0
+    too_small = 1 if tier == "extremely_small" else 0
     if is_min:
-        # minimised: chatbox hidden or 3 lines only
+        # minimised or extremely_small: chatbox hidden
         return {
             "chat_h": 0,
             "chat_w": 0,
@@ -110,14 +142,34 @@ def calc_chatbox_geometry(term_h: int, term_w: int) -> dict[str, int]:
             "is_minimised": 1,
             "inner_w": 0,
             "inner_h": 0,
+            "tier": tier,  # type: ignore
+            "too_small": too_small,  # type: ignore
         }
-    # Normal: chatbox occupies most of screen minus input/footer
-    # input area is 3 rows + header 1
+    # Tier-aware margins
+    if tier == "compact":
+        side_margin = 0
+        avail_w = term_w - side_margin * 2
+        # reduce padding, keep chatbox narrow but usable
+    elif tier in ("large", "wide"):
+        side_margin = 2
+        avail_w = term_w - side_margin * 2
+        # cap max chatbox width for readability on ultra-wide
+        max_chat_w = 110 if tier == "large" else 120
+        avail_w = min(avail_w, max_chat_w)
+    else:  # normal
+        side_margin = 1
+        avail_w = term_w - 2
+
     avail_h = term_h - 5  # 1 header + 3 input + 1 footer margin
-    avail_w = term_w - 2  # side margins
+    # Chatbox occupies flexible output area above composer per spec:
+    # output = flexible, composer = stable (~5-7 rows)
+    # Keep chat_h proportional but capped
     chat_h = max(MIN_CHATBOX_H, min(avail_h, term_h - 5))
+    # On tall terminals, don't dominate screen — cap at ~40% height for output balance
+    if term_h >= 30:
+        chat_h = min(chat_h, max(MIN_CHATBOX_H, term_h // 3 + 2))
     chat_w = max(MIN_CHATBOX_W, avail_w)
-    # Center chatbox if extra width
+    # Center chatbox
     chat_x = max(0, (term_w - chat_w) // 2)
     chat_y = 1
     inner_w = chat_w - 2
@@ -130,6 +182,8 @@ def calc_chatbox_geometry(term_h: int, term_w: int) -> dict[str, int]:
         "is_minimised": 0,
         "inner_w": inner_w,
         "inner_h": inner_h,
+        "tier": tier,  # type: ignore
+        "too_small": 0,  # type: ignore
     }
 
 
@@ -137,31 +191,65 @@ def is_minimised(term_h: int, term_w: int) -> bool:
     return bool(calc_chatbox_geometry(term_h, term_w)["is_minimised"])
 
 
+def is_too_small(term_h: int, term_w: int) -> bool:
+    """True when terminal is extremely small and guard message should show."""
+    return get_layout_tier(term_h, term_w) == "extremely_small"
+
+
 def detect_theme(config_theme: str) -> str:
     """Resolve 'auto' to 'light' or 'dark' based on env hints.
 
-    Uses COLORFGBG, TERM, and OS dark-mode hints. Falls back to 'dark'.
+    Uses COLORFGBG, COLORTERM, TERM_PROGRAM, WT_SESSION and TERM heuristics.
+    Falls back to 'dark'.
     """
     t = (config_theme or "auto").lower()
     if t in ("light", "dark"):
         return t
-    # auto detection
-    # COLORFGBG is "fg;bg" where bg 0-6 dark, 7-8 light on many terms
+    # Windows Terminal
+    if os.environ.get("WT_SESSION"):
+        # WT defaults dark; respect COLORFGBG if set
+        cfb = os.environ.get("COLORFGBG", "")
+        if cfb:
+            parts = cfb.replace(":", ";").split(";")
+            if parts:
+                try:
+                    bg = int(parts[-1])
+                    if 7 <= bg <= 15:
+                        return "light"
+                    if bg <= 6:
+                        return "dark"
+                except Exception:
+                    pass
+        return "dark"
+    # COLORFGBG is "fg;bg" where bg 0-6 dark, 7-15 light on many terms
     cfb = os.environ.get("COLORFGBG", "")
     if cfb:
-        parts = cfb.split(";")
+        # handle both ; and : separators
+        parts = cfb.replace(":", ";").split(";")
         if parts:
             try:
                 bg = int(parts[-1])
-                if bg >= 7 and bg <= 15:
+                if 7 <= bg <= 15:
                     return "light"
                 if bg <= 6:
                     return "dark"
             except Exception:
                 pass
+    # COLORTERM truecolor hints often imply dark
+    colorterm = os.environ.get("COLORTERM", "").lower()
+    if colorterm in ("truecolor", "24bit"):
+        # don't decide solely on this, continue to TERM checks
+        pass
     term = os.environ.get("TERM", "").lower()
     if "light" in term:
         return "light"
+    # VS Code / Apple Terminal heuristics
+    term_program = os.environ.get("TERM_PROGRAM", "").lower()
+    if "vscode" in term_program:
+        # vscode respects theme, but default dark
+        return "dark"
+    if "apple_terminal" in term_program:
+        return "dark"
     # macOS dark mode? not exposed; default dark
     return "dark"
 
@@ -396,6 +484,7 @@ class TuiApp:
         h, w = stdscr.getmaxyx()
         tc = theme_colors(self.theme)
         geom = calc_chatbox_geometry(h, w)
+        tier = geom.get("tier", "normal")  # type: ignore
 
         # Interface background per spec: solid black (dark) or white (light)
         # Chatbox uses offset bg (8), stdscr uses interface bg (9)
@@ -411,10 +500,36 @@ class TuiApp:
         except Exception:
             pass
 
-        # If minimised, show compact view
+        # Extremely small guard per spec 10
+        if geom.get("too_small"):  # type: ignore
+            try:
+                msg1 = "Terminal too small."
+                msg2 = "Resize the terminal to continue."
+                stdscr.addstr(max(0, h // 2 - 1), max(0, (w - len(msg1)) // 2), msg1, curses.A_BOLD if curses else 0)
+                stdscr.addstr(max(0, h // 2), max(0, (w - len(msg2)) // 2), msg2, curses.A_DIM if curses else 0)
+                # still show mode/footer minimally at bottom
+                mode = self.mode
+                col = {"PLAN": 2, "BUILD": 3, "AUTO": 4}.get(mode, 1)
+                try:
+                    if h >= 2 and w >= 10:
+                        stdscr.addstr(h - 1, 1, f"[{mode}]", curses.color_pair(col) | curses.A_BOLD if curses.has_colors() else curses.A_BOLD)
+                        footer = format_model_footer(self.model, self.intelligence)
+                        if len(footer) < w - 4:
+                            stdscr.addstr(h - 1, w - len(footer) - 1, footer, curses.color_pair(1) if curses.has_colors() else 0)
+                except curses.error:
+                    pass
+            except curses.error:
+                pass
+            stdscr.refresh()
+            return
+
+        # If minimised (but not extremely small), show compact view
         if geom["is_minimised"]:
             try:
-                msg = " — minimised — resize larger "
+                if tier == "minimised":
+                    msg = " — minimised — resize larger "
+                else:
+                    msg = " — compact — "
                 stdscr.addstr(0, max(0, (w - len(msg)) // 2), msg, curses.A_BOLD if curses else 0)
                 # show mode + footer even minimised
                 mode = self.mode
@@ -473,6 +588,12 @@ class TuiApp:
             try:
                 chat_win.addstr(chat_h - 2, 2, mode_str, curses.color_pair(col_chat) | curses.A_BOLD if curses.has_colors() else curses.A_BOLD)
                 # model footer same colour as input but on chatbox bg (pair 8)
+                # On compact tier, shorten footer if needed
+                if tier == "compact":
+                    # shorten model name if too long
+                    max_footer = inner_w - 8
+                    if len(footer) > max_footer:
+                        footer = footer[: max_footer - 1] + "…"
                 if len(footer) + 4 < inner_w:
                     chat_win.addstr(chat_h - 2, chat_w - len(footer) - 3, footer, curses.color_pair(8) if curses.has_colors() else 0)
                 else:
@@ -485,6 +606,7 @@ class TuiApp:
             pass
 
         # Input window — on interface bg (not chatbox), contrast per spec
+        # Composer stable near bottom, preserves cursor and status bar
         try:
             inp_h = 3
             inp_y = chat_y + chat_h + 1
@@ -500,13 +622,49 @@ class TuiApp:
                 pass
             inp_win.box()
             prompt = "> "
+            # Input scrolling: keep cursor visible
             max_input = inner_w - len(prompt) - 1 if inner_w > 10 else w - 10
-            visible = self.input_text[-max_input:] if len(self.input_text) > max_input else self.input_text
+            if max_input < 5:
+                max_input = 5
+            # Calculate visible window around cursor_pos
+            total_len = len(self.input_text)
+            if total_len <= max_input:
+                visible = self.input_text
+                cursor_col = len(prompt) + self.cursor_pos
+            else:
+                # ensure cursor visible
+                # offset so cursor is at rightmost or centered
+                if self.cursor_pos <= max_input:
+                    visible = self.input_text[:max_input]
+                    cursor_col = len(prompt) + self.cursor_pos
+                elif self.cursor_pos >= total_len:
+                    visible = self.input_text[-max_input:]
+                    cursor_col = len(prompt) + len(visible)
+                else:
+                    # center cursor
+                    half = max_input // 2
+                    start = max(0, self.cursor_pos - half)
+                    end = min(total_len, start + max_input)
+                    # adjust if near end
+                    if end - start < max_input:
+                        start = max(0, end - max_input)
+                    visible = self.input_text[start:end]
+                    cursor_col = len(prompt) + (self.cursor_pos - start)
+                    # clamp
+                    cursor_col = max(len(prompt), min(cursor_col, len(prompt) + len(visible)))
             tc_pair = curses.color_pair(9) if curses.has_colors() else 0
             inp_win.addstr(1, 1, prompt, curses.A_BOLD | tc_pair)
+            # tier-aware: compact may truncate prompt spacing
             inp_win.addstr(1, 1 + len(prompt), visible, tc_pair | curses.A_BOLD)
-            # status line below input or above footer
-            inp_win.noutrefresh()
+            # Move physical cursor to correct position inside input window
+            try:
+                # inp_win coordinates: (y,x) relative to window
+                inp_win.move(1, min(inp_w - 2, cursor_col + 1))
+                inp_win.noutrefresh()
+                # also sync stdscr cursor for terminals that need it
+                stdscr.move(inp_y + 1, inp_x + min(inp_w - 2, cursor_col + 1))
+            except curses.error:
+                inp_win.noutrefresh()
         except curses.error:
             pass
 
@@ -572,25 +730,37 @@ class TuiApp:
             if it.is_provider_header and it.provider == self.provider:
                 sel = idx
                 break
-        picker_h = min(len(items) + 4, curses.LINES - 4 if hasattr(curses, "LINES") else 20)
-        picker_w = min(60, curses.COLS - 4 if hasattr(curses, "COLS") else 60)
-        # Fallback to stdscr size
+        # Use stdscr size, not curses.LINES/COLS which may be stale
         h, w = stdscr.getmaxyx()
-        picker_h = min(picker_h, h - 4)
-        picker_w = min(picker_w, w - 4)
+        picker_h = min(len(items) + 4, h - 4 if h > 4 else 20)
+        picker_w_raw = min(60, w - 4 if w > 4 else 60)
+        # ensure picker not too narrow for title
+        title = " Select provider / model — Enter to confirm, Esc to cancel "
+        min_w = min(len(title) + 4, w - 2 if w > 2 else len(title) + 4)
+        picker_w = max(min_w, picker_w_raw)
+        picker_w = min(picker_w, w - 2 if w > 2 else picker_w)
+        if picker_h < 5:
+            picker_h = 5
+        if picker_w < 20:
+            picker_w = min(60, w - 2 if w > 2 else 60)
         picker_y = (h - picker_h) // 2
         picker_x = (w - picker_w) // 2
         # Keys: up/down, enter, esc
         while True:
             h, w = stdscr.getmaxyx()
+            # recalc on resize
+            picker_h = min(len(items) + 4, h - 4 if h > 4 else 20)
+            picker_w_raw = min(60, w - 4 if w > 4 else 60)
+            picker_w = max(min_w, picker_w_raw)
+            picker_w = min(picker_w, w - 2 if w > 2 else picker_w)
+            if picker_h < 5:
+                picker_h = 5
             picker_y = max(0, (h - picker_h) // 2)
             picker_x = max(0, (w - picker_w) // 2)
             try:
                 win = curses.newwin(picker_h, picker_w, picker_y, picker_x)
                 win.box()
-                title = " Select provider / model — Enter to confirm, Esc to cancel "
-                win.addstr(0, max(1, (picker_w - len(title)) // 2), title, curses.A_BOLD)
-                # Help line
+                win.addstr(0, max(1, (picker_w - len(title)) // 2), title[: picker_w - 2], curses.A_BOLD)
                 # Visible window
                 visible_start = max(0, sel - (picker_h - 4) // 2)
                 visible_end = min(len(items), visible_start + picker_h - 3)
@@ -607,8 +777,8 @@ class TuiApp:
                     else:
                         txt = f"   {it.label}"
                         attr = 0
-                    # Truncate to fit
-                    txt = txt[: picker_w - 2].ljust(picker_w - 2)
+                    # Truncate to fit and ensure 1-char padding
+                    txt = txt[: max(0, picker_w - 2)].ljust(max(0, picker_w - 2))
                     # Pink highlight on selected entire row
                     if i == sel:
                         # full-row pink bg
@@ -650,6 +820,77 @@ class TuiApp:
                 sel = min(len(items) - 1, sel + 1)
             elif ch == curses.KEY_RESIZE if HAS_CURSES and hasattr(curses, "KEY_RESIZE") else 410:
                 # just redraw
+                pass
+
+    def _run_intel_picker(self, stdscr) -> str | None:
+        """Show intelligence picker overlay. Returns chosen level or None."""
+        if not HAS_CURSES or curses is None:
+            return None
+        h, w = stdscr.getmaxyx()
+        picker_h = len(INTEL_DISPLAY_ORDER) + 4
+        picker_w = 36
+        # ensure fits
+        picker_h = min(picker_h, h - 4 if h > 4 else picker_h)
+        picker_w = min(picker_w, w - 4 if w > 4 else picker_w)
+        if picker_h < 5:
+            picker_h = 5
+        picker_y = (h - picker_h) // 2
+        picker_x = (w - picker_w) // 2
+        # find current selection index
+        sel = 0
+        for idx, lvl in enumerate(INTEL_DISPLAY_ORDER):
+            if lvl == self.intelligence:
+                sel = idx
+                break
+        title = " Intelligence — Enter to confirm, Esc to cancel "
+        while True:
+            h, w = stdscr.getmaxyx()
+            picker_y = max(0, (h - picker_h) // 2)
+            picker_x = max(0, (w - picker_w) // 2)
+            try:
+                win = curses.newwin(picker_h, picker_w, picker_y, picker_x)
+                win.box()
+                win.addstr(0, max(1, (picker_w - len(title)) // 2), title[: picker_w - 2], curses.A_BOLD)
+                for i, lvl in enumerate(INTEL_DISPLAY_ORDER):
+                    y = 1 + i
+                    if y >= picker_h - 1:
+                        break
+                    n_ctx, n_pred, _, _ = intelligence_values(lvl)
+                    label = f" {lvl} ({n_ctx}/{n_pred}) "
+                    # mark current
+                    if lvl == self.intelligence:
+                        label = f"★ {lvl} ({n_ctx}/{n_pred}) "
+                    else:
+                        label = f"  {lvl} ({n_ctx}/{n_pred}) "
+                    txt = label[: max(0, picker_w - 2)].ljust(max(0, picker_w - 2))
+                    if i == sel:
+                        try:
+                            hl = curses.color_pair(5) | curses.A_BOLD if curses.has_colors() else curses.A_REVERSE
+                            win.addstr(y, 1, txt, hl)
+                        except curses.error:
+                            win.addstr(y, 1, txt, curses.A_REVERSE)
+                    else:
+                        win.addstr(y, 1, txt, 0)
+                win.addstr(picker_h - 1, 2, "↑/↓ move  Enter select  Esc cancel"[: picker_w - 4], curses.A_DIM)
+                win.noutrefresh()
+                curses.doupdate()
+            except curses.error:
+                pass
+            try:
+                ch = stdscr.getch()
+            except Exception:
+                return None
+            if ch in (27,):
+                return None
+            if ch in (10, 13, curses.KEY_ENTER if hasattr(curses, "KEY_ENTER") else 10):
+                return INTEL_DISPLAY_ORDER[sel]
+            if ch in (curses.KEY_UP if HAS_CURSES else 259, 259):
+                sel = max(0, sel - 1)
+            elif ch in (curses.KEY_DOWN if HAS_CURSES else 258, 258):
+                sel = min(len(INTEL_DISPLAY_ORDER) - 1, sel + 1)
+            elif ch == 9:
+                sel = min(len(INTEL_DISPLAY_ORDER) - 1, sel + 1)
+            elif ch == curses.KEY_RESIZE if HAS_CURSES and hasattr(curses, "KEY_RESIZE") else 410:
                 pass
 
     def _do_connect(self, stdscr) -> None:
@@ -709,24 +950,33 @@ class TuiApp:
         # Don't show API key field for ollama
         fields = 1 if prov == "ollama" else 2
         while True:
+            # recalc position on each loop for resize safety
+            h, w = stdscr.getmaxyx()
+            dialog_y = max(0, (h - dialog_h) // 2)
+            dialog_x = max(0, (w - dialog_w) // 2)
+            dialog_w = min(64, w - 4 if w > 4 else 64)
+            if dialog_w < 20:
+                dialog_w = w - 2 if w > 2 else 20
             try:
                 win = curses.newwin(dialog_h, dialog_w, dialog_y, dialog_x)
                 win.box()
                 title = f" Connect — {prov} "
-                win.addstr(0, (dialog_w - len(title)) // 2, title, curses.A_BOLD)
+                win.addstr(0, max(0, (dialog_w - len(title)) // 2), title, curses.A_BOLD)
                 for idx in range(fields):
                     y = 2 + idx * 2
-                    win.addstr(y, 2, labels[idx][: dialog_w - 4])
+                    if y + 1 >= dialog_h - 1:
+                        continue
+                    win.addstr(y, 2, labels[idx][: max(0, dialog_w - 4)])
                     # input field highlight: pink bg if selected
-                    txt = buf[idx][: dialog_w - 4]
+                    txt = buf[idx][: max(0, dialog_w - 4)]
                     # mask api key
                     if idx == 1 and txt:
                         disp = "*" * len(txt)
                     else:
                         disp = txt
                     attr = curses.color_pair(5) if idx == field and HAS_CURSES and curses.has_colors() else (curses.A_REVERSE if idx == field else 0)
-                    win.addstr(y + 1, 2, disp.ljust(dialog_w - 4)[: dialog_w - 4], attr)
-                win.addstr(dialog_h - 2, 2, "Enter: confirm  Tab: next  Esc: cancel".ljust(dialog_w - 4)[: dialog_w - 4], curses.A_DIM)
+                    win.addstr(y + 1, 2, disp.ljust(max(0, dialog_w - 4))[: max(0, dialog_w - 4)], attr)
+                win.addstr(dialog_h - 2, 2, "Enter: confirm  Tab: next  Esc: cancel"[: max(0, dialog_w - 4)], curses.A_DIM)
                 win.noutrefresh()
                 curses.doupdate()
             except curses.error:
@@ -780,9 +1030,7 @@ class TuiApp:
             elif 32 <= ch <= 126:
                 buf[field] += chr(ch)
             elif ch == curses.KEY_RESIZE if HAS_CURSES and hasattr(curses, "KEY_RESIZE") else 410:
-                h, w = stdscr.getmaxyx()
-                dialog_y = (h - dialog_h) // 2
-                dialog_x = (w - dialog_w) // 2
+                continue
 
     def _handle_slash(self, stdscr, text: str) -> None:
         cmd, args = parse_slash_command(text)
@@ -801,6 +1049,18 @@ class TuiApp:
             return
         if cmd == "intel":
             if not args:
+                # interactive picker per spec 58-59
+                if HAS_CURSES and curses is not None and stdscr is not None:
+                    chosen = self._run_intel_picker(stdscr)
+                    if chosen:
+                        try:
+                            msg = self.set_intelligence(chosen)
+                            self.status_msg = msg
+                        except ValueError as e:
+                            self.status_msg = str(e)
+                    else:
+                        self.status_msg = f"Intelligence cancelled (current: {self.intelligence})"
+                    return
                 self.status_msg = f"Usage: /intel {'|'.join(INTEL_CHOICES)}  (current: {self.intelligence})"
                 return
             try:
@@ -817,6 +1077,7 @@ class TuiApp:
                 provider_models = list_all_providers_with_models(timeout=2, use_cache=True)
             except Exception:
                 provider_models = {p: [] for p in PROVIDER_NAMES}
+                self.status_msg = "Unable to load models."
             res = self._run_picker(stdscr, provider_models)
             if res:
                 prov, model = res
@@ -831,7 +1092,10 @@ class TuiApp:
                 self.status_msg = "Model selection cancelled"
             return
         if cmd == "connect":
-            self._do_connect(stdscr)
+            try:
+                self._do_connect(stdscr)
+            except Exception:
+                self.status_msg = "Unable to connect provider."
             return
         self.status_msg = f"Unknown command /{cmd} — try /help"
 
@@ -955,7 +1219,7 @@ class TuiApp:
 
     def _preview_layout(self) -> None:
         """Render an ASCII preview of the full curses layout for headless inspection."""
-        # Use 67 cols outer (61 inner) as minimal width that fits HELLO_TEXT, but expand to 78 for nicer preview
+        # Use 78 cols outer as preview; tier-aware but static 78 for consistency
         w = 78
         inner = w - 2
         # Ensure HELLO_TEXT fits
@@ -988,13 +1252,16 @@ class TuiApp:
             gap = 2
         print("│  " + mode_disp + " " * gap + footer + "  │")
         print("└" + "─" * (w - 2) + "┘")
-        # Input area
+        # Input area — show cursor
+        # Simulate input cursor at end
+        cursor_demo = self.input_text or "_"
         print("┌" + " Input ".center(w - 2, "─") + "┐")
-        print("│ > " + "_" * (inner - 4) + " │")
+        inp_line = f" > {cursor_demo}"
+        print("│" + inp_line.ljust(inner) + "│")
         print("└" + "─" * (w - 2) + "┘")
         print("TAB: switch mode  |  /models  /connect  /intel  /help".center(w))
         print(f"Colors: PLAN orange(208) BUILD blue(27) AUTO red(196)  •  Pink highlight 213 on selection".center(w))
-        print(f"Minimise: resize <50×12 → compact (inner {MIN_CHATBOX_INNER_W} collapses) ".center(w))
+        print(f"Tier: {get_layout_tier(24, w)}  •  Minimise: <50×12  Extremely small: <40×10".center(w))
         print("─" * w)
         print("")
 
@@ -1004,6 +1271,7 @@ class TuiApp:
         print(f"Mode: {self.mode} (TAB cycles PLAN->BUILD->AUTO)")
         print(f"Model: {format_model_footer(self.model, self.intelligence)}  Theme: {self.theme}")
         print(f"Chatbox inner width {MIN_CHATBOX_INNER_W} fits: {HELLO_TEXT!r}")
+        print(f"Tier demo: 120x40={get_layout_tier(40,120)} 80x24={get_layout_tier(24,80)} 60x20={get_layout_tier(20,60)} 40x10={get_layout_tier(10,40)}")
         print("Commands: /models  /connect  /intel [low|medium|high|xhigh|default]  /quit")
         # Show preview so user sees how full UI looks even without a TTY
         self._preview_layout()
@@ -1023,7 +1291,13 @@ class TuiApp:
                 cmd, args = parse_slash_command(line)
                 if cmd == "intel":
                     if not args:
-                        print(f"Usage: /intel {'|'.join(INTEL_CHOICES)} (current {self.intelligence})")
+                        # In fallback, show list
+                        print(f"Intelligence levels: {', '.join(INTEL_DISPLAY_ORDER)} (current {self.intelligence})")
+                        print("Usage: /intel <level>")
+                        for lvl in INTEL_DISPLAY_ORDER:
+                            n_ctx, n_pred, _, _ = intelligence_values(lvl)
+                            marker = "★" if lvl == self.intelligence else " "
+                            print(f" {marker} {lvl:7} ({n_ctx}/{n_pred})")
                     else:
                         try:
                             msg = self.set_intelligence(args[0])
@@ -1046,6 +1320,7 @@ class TuiApp:
                     break
                 elif cmd in ("help", "?"):
                     print("Commands: /models /connect /intel /help /quit ; TAB cycles mode")
+                    print("Tiers: large/medium/compact/minimised/extremely_small")
                 else:
                     print(f"Unknown /{cmd}")
                 continue
