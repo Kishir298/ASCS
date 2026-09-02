@@ -120,7 +120,7 @@ def test_theme_background_and_input_contrast():
 
 
 def test_footer_format_model_intelligence():
-    assert format_model_footer("qwen3:14b", "high") == "qwen3:14b(high)"
+    assert format_model_footer("qwen3-coder:30b", "high") == "qwen3-coder:30b(high)"
     assert format_model_footer("gpt-4o", "xhigh") == "gpt-4o(xhigh)"
     # same colour as input (verified via theme_colors)
     tc = theme_colors("dark")
@@ -141,8 +141,8 @@ def test_intelligence_levels_both_window_and_retrieval():
     xhigh = intelligence_values("xhigh")
     assert low[0] < xhigh[0]  # num_ctx
     assert low[3] < xhigh[3]  # retrieve level
-    # default alias should equal high's window but medium's level? per our map default= high window but level 2
-    assert intelligence_values("default") == intelligence_values("high") or intelligence_values("default")[0] == 32768
+    # default alias should equal high's window (65k bump for 30b)
+    assert intelligence_values("default") == intelligence_values("high") or intelligence_values("default")[0] == 65536
     # config integration: intelligence sets both
     import tempfile, pathlib
     tmp = pathlib.Path(tempfile.gettempdir()) / "tmp_tui_intel_ws"
@@ -150,9 +150,9 @@ def test_intelligence_levels_both_window_and_retrieval():
     c_low = load_config(workspace=str(tmp), intelligence="low")
     c_xhigh = load_config(workspace=str(tmp), intelligence="xhigh")
     assert c_low.num_ctx == 8192 and c_low.num_predict == 2048 and c_low.retrieve_level == 1
-    assert c_xhigh.num_ctx == 65536 and c_xhigh.num_predict == 16384 and c_xhigh.retrieve_level == 4
+    assert c_xhigh.num_ctx == 131072 and c_xhigh.num_predict == 32768 and c_xhigh.retrieve_level == 4
     assert c_low.context_budget_chars == 30000
-    assert c_xhigh.context_budget_chars == 100000
+    assert c_xhigh.context_budget_chars == 140000
 
 
 def test_provider_list_includes_all_majors_and_ollama_always():
@@ -174,7 +174,7 @@ def test_models_per_provider_and_empty_when_no_key():
 def test_provider_picker_bold_and_pink_highlight_structure():
     # Provider header should be bold; we verify build_picker_items creates correct structure
     provider_models = {
-        "ollama": ["qwen3:14b", "llama3:8b"],
+        "ollama": ["qwen3-coder:30b", "llama3:8b"],
         "openai": ["gpt-4o"],
         "anthropic": [],
         "grok": [],

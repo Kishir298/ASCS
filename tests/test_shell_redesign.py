@@ -185,7 +185,7 @@ def test_tuiapp_mode_persistence(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_TUI_STATE_PATH", str(tmp_path / "state.json"))
     ws = tmp_path / "ws"
     ws.mkdir()
-    cfg = AgentConfig(workspace=ws, mode="PLAN", provider="ollama", model="qwen3:14b", intelligence="high")
+    cfg = AgentConfig(workspace=ws, mode="PLAN", provider="ollama", model="qwen3-coder:30b", intelligence="high")
     app = TuiApp(cfg)
     assert app.mode == "PLAN"
     app.cycle_mode()
@@ -201,7 +201,7 @@ def test_tuiapp_mode_persistence(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_model_footer_format():
-    assert format_model_footer("qwen3:14b", "high") == "qwen3:14b(high)"
+    assert format_model_footer("qwen3-coder:30b", "high") == "qwen3-coder:30b(high)"
     for lvl in INTEL_CHOICES:
         assert format_model_footer("m", lvl) == f"m({lvl})"
 
@@ -218,9 +218,9 @@ def test_intel_real_config_wiring(tmp_path):
     msg = app.set_intelligence("xhigh")
     assert "xhigh" in msg
     assert app.intelligence == "xhigh"
-    # wiring: num_ctx changes
+    # wiring: num_ctx changes (xhigh bumped for 30b)
     n_ctx, n_pred, c_budget, lvl = intelligence_values("xhigh")
-    assert n_ctx == 65536
+    assert n_ctx == 131072
     # also via load_config
     cfg = load_config(workspace=str(ws), intelligence="low")
     assert cfg.num_ctx == 8192
@@ -307,13 +307,13 @@ def test_input_long_preserves_status_bar(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_build_picker_bold_and_indented():
-    pm = {"ollama": ["qwen3:14b"], "openai": ["gpt-4o"], "anthropic": [], "grok": [], "google": [], "deepseek": []}
+    pm = {"ollama": ["qwen3-coder:30b"], "openai": ["gpt-4o"], "anthropic": [], "grok": [], "google": [], "deepseek": []}
     items = build_picker_items(pm)
     headers = [i for i in items if i.is_provider_header]
     assert len(headers) == 6
     # model rows indented with 3 spaces in code
     model_items = [i for i in items if not i.is_provider_header]
-    assert any(i.label == "qwen3:14b" for i in model_items)
+    assert any(i.label == "qwen3-coder:30b" for i in model_items)
     # provider header selectable, model indented
     assert items[0].is_provider_header is True
 
@@ -369,7 +369,7 @@ def test_status_bar_spacing():
     for w in [80, 100, 120]:
         g = calc_chatbox_geometry(24, w)
         inner_w = g["inner_w"]
-        footer = format_model_footer("qwen3:14b", "high")
+        footer = format_model_footer("qwen3-coder:30b", "high")
         mode = "PLAN"
         needed = len(mode) + len(footer) + 4
         assert needed < inner_w, f"status bar would overlap at {w}"

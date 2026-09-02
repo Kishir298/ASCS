@@ -8,8 +8,15 @@
         "baseURL": "http://localhost:11434/v1"
       },
       "models": {
-        "qwen3:14b": {
-          "name": "Qwen3 14B (local)",
+        "qwen3-coder:30b": {
+          "name": "Qwen3-Coder 30B (local)",
+          "limit": {
+            "context": 65536,
+            "output": 16384
+          }
+        },
+        "qwen2.5-coder:14b": {
+          "name": "Qwen2.5-Coder 14B (fallback, 16GB)",
           "limit": {
             "context": 32768,
             "output": 8192

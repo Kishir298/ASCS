@@ -489,9 +489,10 @@ def test_missing_task_state_loads_none(tmp_path):
 
 def _ollama_available() -> bool:
     try:
+        from agent.config import DEFAULT_MODEL
         from agent.ollama import OllamaClient
 
-        client = OllamaClient(model="qwen3:14b", request_timeout=10)
+        client = OllamaClient(model=DEFAULT_MODEL, request_timeout=10)
         return client.check_connectivity(timeout=5)
     except Exception:
         return False
@@ -499,10 +500,10 @@ def _ollama_available() -> bool:
 
 @pytest.mark.skipif(
     os.environ.get("RISALIVE") != "1",
-    reason="Live qwen3:14b smoke test — opt-in: set RISALIVE=1 (takes minutes)",
+    reason="Live qwen3-coder:30b smoke test — opt-in: set RISALIVE=1 (takes minutes)",
 )
 def test_live_model_smoke(tmp_path):
-    """Live qwen3:14b: write one file and verify via real toolchain (BUILD mode).
+    """Live qwen3-coder:30b (fallback qwen2.5-coder:14b): write one file and verify via real toolchain (BUILD mode).
 
     This test runs against a real Ollama server and a real temp repo.
     Skipped when Ollama is not reachable.
@@ -526,7 +527,7 @@ def test_live_model_smoke(tmp_path):
     config = load_config(
         workspace=str(tmp_path),
         mode="BUILD",
-        model="qwen3:14b",
+        model=os.environ.get("OLLAMA_MODEL", "qwen3-coder:30b"),
         max_iterations=15,
     )
     client = OllamaClient(

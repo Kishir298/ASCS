@@ -192,7 +192,7 @@ def test_theme_background_and_input_contrast():
 
 
 def test_footer_format_model_intelligence():
-    assert format_model_footer("qwen3:14b", "high") == "qwen3:14b(high)"
+    assert format_model_footer("qwen3-coder:30b", "high") == "qwen3-coder:30b(high)"
     assert format_model_footer("gpt-4o", "xhigh") == "gpt-4o(xhigh)"
     # same colour as input (verified via theme_colors)
     tc = theme_colors("dark")
@@ -213,8 +213,8 @@ def test_intelligence_levels_both_window_and_retrieval():
     xhigh = intelligence_values("xhigh")
     assert low[0] < xhigh[0]  # num_ctx
     assert low[3] < xhigh[3]  # retrieve level
-    # default alias should equal high's window but medium's level? per our map default= high window but level 2
-    assert intelligence_values("default") == intelligence_values("high") or intelligence_values("default")[0] == 32768
+    # default alias should equal high's window (65k bump for 30b)
+    assert intelligence_values("default") == intelligence_values("high") or intelligence_values("default")[0] == 65536
     # config integration: intelligence sets both
     import tempfile, pathlib
 
@@ -223,9 +223,9 @@ def test_intelligence_levels_both_window_and_retrieval():
     c_low = load_config(workspace=str(tmp), intelligence="low")
     c_xhigh = load_config(workspace=str(tmp), intelligence="xhigh")
     assert c_low.num_ctx == 8192 and c_low.num_predict == 2048 and c_low.retrieve_level == 1
-    assert c_xhigh.num_ctx == 65536 and c_xhigh.num_predict == 16384 and c_xhigh.retrieve_level == 4
+    assert c_xhigh.num_ctx == 131072 and c_xhigh.num_predict == 32768 and c_xhigh.retrieve_level == 4
     assert c_low.context_budget_chars == 30000
-    assert c_xhigh.context_budget_chars == 100000
+    assert c_xhigh.context_budget_chars == 140000
 
 
 def test_provider_list_includes_all_majors_and_ollama_always():
@@ -247,7 +247,7 @@ def test_models_per_provider_and_empty_when_no_key():
 def test_provider_picker_bold_and_pink_highlight_structure():
     # Provider header should be bold; we verify build_picker_items creates correct structure
     provider_models = {
-        "ollama": ["qwen3:14b", "llama3:8b"],
+        "ollama": ["qwen3-coder:30b", "llama3:8b"],
         "openai": ["gpt-4o"],
         "anthropic": [],
         "grok": [],
@@ -456,7 +456,7 @@ def test_tuiapp_mode_persistence(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_TUI_STATE_PATH", str(tmp_path / "state.json"))
     ws = tmp_path / "ws"
     ws.mkdir()
-    cfg = AgentConfig(workspace=ws, mode="PLAN", provider="ollama", model="qwen3:14b", intelligence="high")
+    cfg = AgentConfig(workspace=ws, mode="PLAN", provider="ollama", model="qwen3-coder:30b", intelligence="high")
     app = TuiApp(cfg)
     assert app.mode == "PLAN"
     app.cycle_mode()
@@ -468,7 +468,7 @@ def test_tuiapp_mode_persistence(tmp_path, monkeypatch):
 
 
 def test_model_footer_format():
-    assert format_model_footer("qwen3:14b", "high") == "qwen3:14b(high)"
+    assert format_model_footer("qwen3-coder:30b", "high") == "qwen3-coder:30b(high)"
     for lvl in INTEL_CHOICES:
         assert format_model_footer("m", lvl) == f"m({lvl})"
 
@@ -485,9 +485,9 @@ def test_intel_real_config_wiring(tmp_path):
     msg = app.set_intelligence("xhigh")
     assert "xhigh" in msg
     assert app.intelligence == "xhigh"
-    # wiring: num_ctx changes
+    # wiring: num_ctx changes (xhigh bumped for 30b)
     n_ctx, n_pred, c_budget, lvl = intelligence_values("xhigh")
-    assert n_ctx == 65536
+    assert n_ctx == 131072
     # also via load_config
     cfg = load_config(workspace=str(ws), intelligence="low")
     assert cfg.num_ctx == 8192
@@ -566,13 +566,13 @@ def test_input_long_preserves_status_bar(tmp_path):
 
 
 def test_build_picker_bold_and_indented():
-    pm = {"ollama": ["qwen3:14b"], "openai": ["gpt-4o"], "anthropic": [], "grok": [], "google": [], "deepseek": []}
+    pm = {"ollama": ["qwen3-coder:30b"], "openai": ["gpt-4o"], "anthropic": [], "grok": [], "google": [], "deepseek": []}
     items = build_picker_items(pm)
     headers = [i for i in items if i.is_provider_header]
     assert len(headers) == 6
     # model rows indented with 3 spaces in code
     model_items = [i for i in items if not i.is_provider_header]
-    assert any(i.label == "qwen3:14b" for i in model_items)
+    assert any(i.label == "qwen3-coder:30b" for i in model_items)
     # provider header selectable, model indented
     assert items[0].is_provider_header is True
 
@@ -625,7 +625,7 @@ def test_status_bar_spacing():
     for w in [80, 100, 120]:
         g = calc_chatbox_geometry(24, w)
         inner_w = g["inner_w"]
-        footer = format_model_footer("qwen3:14b", "high")
+        footer = format_model_footer("qwen3-coder:30b", "high")
         mode = "PLAN"
         needed = len(mode) + len(footer) + 4
         assert needed < inner_w, f"status bar would overlap at {w}"

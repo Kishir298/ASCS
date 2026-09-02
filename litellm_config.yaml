@@ -1,9 +1,15 @@
 model_list:
   - model_name: claude-opus-5
     litellm_params:
-      model: ollama/qwen3:14b
+      model: ollama/qwen3-coder:30b
       api_base: http://127.0.0.1:11434
       think: false
+  # Fallback on 16GB: uncomment to use qwen2.5-coder:14b
+  # - model_name: claude-opus-5-fallback
+  #   litellm_params:
+  #     model: ollama/qwen2.5-coder:14b
+  #     api_base: http://127.0.0.1:11434
+  #     think: false
 
 litellm_settings:
   drop_params: true

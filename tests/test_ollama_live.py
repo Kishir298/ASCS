@@ -11,8 +11,8 @@ Run them with:
 
 Requirements to actually execute (not just collect):
     * Ollama is running at OLLAMA_BASE_URL (default http://localhost:11434).
-    * The configured model (default qwen3:14b) is installed, e.g.
-      ``ollama pull qwen3:14b``.
+    * The configured model (default qwen3-coder:30b, fallback qwen2.5-coder:14b) is installed, e.g.
+      ``ollama pull qwen3-coder:30b``.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ import os
 
 import pytest
 
+from agent.config import DEFAULT_MODEL
 from agent.ollama import (
     OllamaClient,
     OllamaModelNotFoundError,
@@ -34,7 +35,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 LIVE_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-LIVE_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:14b")
+LIVE_MODEL = os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
 
 
 def _client() -> OllamaClient:
@@ -68,7 +69,7 @@ def test_live_ollama_tiny_chat_non_empty():
     """A tiny prompt must produce a non-empty assistant response.
 
     Note: the per-call ceiling is generous (180 s) because non-streaming
-    generation is CPU-bound on slower machines — a warm ``qwen3:14b`` on a
+    generation is CPU-bound on slower machines — a warm ``qwen3-coder:30b`` on a
     laptop routinely takes 40+ s to finish a short answer here.
     """
     client = _client()
