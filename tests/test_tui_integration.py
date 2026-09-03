@@ -381,7 +381,7 @@ def test_run_fallback_returns_error(tmp_path):
 
 
 def test_live_config_reflects_ui_state(tmp_path):
-    cfg = AgentConfig(workspace=tmp_path, mode="PLAN", model="qwen3:14b", intelligence="low")
+    cfg = AgentConfig(workspace=tmp_path, mode="PLAN", model="qwen2.5-coder:14b", intelligence="low")
     app = TuiApp(cfg)
     app.mode = "BUILD"
     app.model = "qwen3-coder:30b"
