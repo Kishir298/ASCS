@@ -283,6 +283,27 @@ def _check_git(cfg: AgentConfig) -> CheckResult:
     return CheckResult("git", PASS, "git available; workspace is a repository")
 
 
+def _check_runtime_platform() -> CheckResult:
+    """Runtime is Windows-only; dev testing is cross-platform.
+
+    The agent's shell workflow (cmd.exe, ``python``/``pip`` on PATH) is
+    Windows-first. Dev testing via ``pytest`` is intentionally cross-platform
+    (``tools._python_fallback_command`` handles ``python`` -> ``python3``),
+    but the full runtime (Ollama + risa TUI/Web) is only supported on Windows.
+    """
+    import os as _os
+
+    if _os.name == "nt":
+        return CheckResult("platform", PASS, "Windows runtime (supported)")
+    return CheckResult(
+        "platform",
+        WARN,
+        "Non-Windows host — dev testing (pytest) is cross-platform, but the "
+        "full ASCS runtime (Ollama/TUI/Web) is Windows-only. "
+        "Tool execution falls back ``python`` -> ``python3`` for dev.",
+    )
+
+
 def _check_tests(cfg: AgentConfig) -> CheckResult:
     if not _pytest_available():
         return CheckResult("tests", WARN, "pytest is not installed.")
@@ -318,6 +339,7 @@ def doctor(*, workspace: str | Path | None = None, **config_overrides) -> Doctor
         results.append(CheckResult("config", FAIL, f"Invalid configuration: {exc}"))
         cfg = _best_effort_cfg()
 
+    results.append(_check_runtime_platform())
     results.append(_check_python())
     results.append(_check_install())
     results.append(_check_workspace(cfg))

@@ -82,7 +82,9 @@ def _read_pyproject_tools(root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]
             node = node[key]
         return bool(node)
 
-    # pytest config -> "python -m pytest"
+    # pytest config -> "python -m pytest" (Windows canonical; POSIX dev fallback
+    # is handled at execution time in tools._python_fallback_command, so the
+    # toolchain text stays Windows-consistent for prompts and tests).
     if _present("tool.pytest"):
         tests.append("python -m pytest")
     if _present("tool.pytest.ini_options"):
