@@ -18,9 +18,14 @@ Note: `qwen3-coder:30b` (or fallback `qwen2.5-coder:14b`) may not be installed o
 on a given machine. Treat live-model verification as a separate, explicit,
 opt-in step. Max-chunking splits 300k-token objectives into ~8k shards within the 65k window.
 
+## Platform
+
+- **Runtime (risa --ui/--tui, Ollama): Windows-only** (32 GB target). `risa --doctor` warns on non-Windows.
+- **Dev testing (pytest): cross-platform.** `agent/tools.py:507` transparently maps `python` -> `python3` on POSIX where only `python3` exists, so the suite passes on macOS/Linux too (use `.venv/bin/python -m pytest` or plain `python3 -m pytest`).
+
 ## Test commands
 
-- Full deterministic suite: `pytest -q` (expect `538 passed, 5 skipped`)
+- Full deterministic suite: `pytest -q` (expect `564 passed, 6 skipped` after TUI; legacy `538 passed, 5 skipped`)
 - Ollama client unit tests: `pytest -q tests/test_ollama.py`
 - Experience-store / pipeline tests: `pytest -q tests/test_experience_pipeline.py`
 - Live smoke (opt-in, requires running Ollama + `qwen3-coder:30b`):

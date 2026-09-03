@@ -28,6 +28,13 @@ real STOP/cancellation.
   `http://localhost:11434`)
 - A code model, e.g. `ollama pull qwen3-coder:30b` (the default model, 30B coder ~19 GB; fallback `ollama pull qwen2.5-coder:14b` for 16 GB)
 
+> **Platform note:** The full runtime (`risa --ui` / `--tui`, Ollama) is
+> **Windows-only** (32 GB recommended target). **Dev testing (`pytest`) is
+> cross-platform:** on macOS/Linux `python` transparently falls back to
+> `python3` at execution time (`agent/tools.py:507`), so `pytest` passes
+> inside or outside a venv. Use `.venv/bin/python -m pytest -q` on any OS for
+> the canonical run.
+
 ## Install (Windows PowerShell)
 
 Create a virtual environment and install the project from `requirements.txt`
@@ -332,8 +339,10 @@ setup and verification, including the OpenCode `ollama/qwen3-coder:30b` + fallba
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt   # or: python -m pip install -e ".[dev]"
-python -m pytest
+python -m pytest                            # venv python on Windows; macOS/Linux devs: .venv/bin/python -m pytest -q (python -> python3 fallback automatic)
 ```
+
+> Cross-platform dev: `pytest` is cross-platform (macOS/Linux fallback `python` -> `python3` is automatic in `agent/tools.py:507`). The full runtime (`risa --ui`/`--tui`) remains Windows-only.
 
 All tests run offline against scripted fake clients and an in-process mock
 Ollama server — **no Ollama required**. The skipped tests are the opt-in live
