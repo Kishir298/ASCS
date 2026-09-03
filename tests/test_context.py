@@ -362,8 +362,18 @@ def test_context_bundle_contains_file_headers(
 
 
 def test_default_chunk_budget_is_4096() -> None:
-    # Bumped for max-chunking 300k: 8192 (qwen3-coder:30b 65k ctx)
+    # Dual limits: primary qwen3-coder:30b 8192, fallback qwen2.5-coder:14b 4096
+    from agent.context import (
+        DEFAULT_CHUNK_TOKENS_14B,
+        DEFAULT_CHUNK_TOKENS_30B,
+    )
+
     assert DEFAULT_CHUNK_TOKENS == 8192
+    assert DEFAULT_CHUNK_TOKENS_30B == 8192
+    assert DEFAULT_CHUNK_TOKENS_14B == 4096
+    assert ProjectIndex.chunk_tokens_for("qwen3-coder:30b") == 8192
+    assert ProjectIndex.chunk_tokens_for("qwen2.5-coder:14b") == 4096
+    assert ProjectIndex.chunk_tokens_for("qwen3:14b") == 4096  # legacy substring still maps to fallback
 
 
 def test_empty_query_returns_deterministic_records(

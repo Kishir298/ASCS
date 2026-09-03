@@ -29,7 +29,14 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 
-DEFAULT_CHUNK_TOKENS = 8192  # max-chunking for 300k: 2× prev, each shard still fits 65k ctx
+DEFAULT_CHUNK_TOKENS = 8192  # primary qwen3-coder:30b chunk (fallback qwen2.5-coder:14b uses 4096)
+DEFAULT_CHUNK_TOKENS_30B = 8192  # qwen3-coder:30b (65k ctx, high/xhigh 131k)
+DEFAULT_CHUNK_TOKENS_14B = 4096  # qwen2.5-coder:14b fallback (32k ctx, 16GB)
+# Model-aware lookup: qwen2.5 fallback halves the shard to fit the smaller window.
+CHUNK_TOKENS_BY_MODEL: dict[str, int] = {
+    "qwen3-coder:30b": DEFAULT_CHUNK_TOKENS_30B,
+    "qwen2.5-coder:14b": DEFAULT_CHUNK_TOKENS_14B,
+}
 DEFAULT_STATE_DIR = ".ascs"
 DEFAULT_INDEX_FILE = "context_index.json"
 
@@ -1181,6 +1188,21 @@ class ProjectIndex:
     # ------------------------------------------------------------------
     # Utilities
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def chunk_tokens_for(model: str | None) -> int:
+        """Return the model-appropriate chunk token limit.
+
+        Primary ``qwen3-coder:30b`` uses 8192; fallback ``qwen2.5-coder:14b``
+        uses 4096 to fit its smaller 32k window on 16GB hosts. Unknown models
+        default to the primary limit.
+        """
+        if not model:
+            return DEFAULT_CHUNK_TOKENS_30B
+        normalized = model.strip().lower()
+        if "qwen2.5" in normalized or "14b" in normalized:
+            return DEFAULT_CHUNK_TOKENS_14B
+        return DEFAULT_CHUNK_TOKENS_30B
 
     @staticmethod
     def estimate_tokens(text: str) -> int:
