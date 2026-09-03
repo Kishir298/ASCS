@@ -504,6 +504,36 @@ def _terminate_tree(proc: subprocess.Popen) -> None:
         pass
 
 
+def _python_fallback_command(command: str) -> str:
+    """Rewrite a ``python``-prefixed command to ``python3`` on POSIX when needed.
+
+    Dev testing must work on any platform (macOS/Linux Homebrew often only
+    provides ``python3``), while the runtime remains Windows-only. If ``python``
+    is not on PATH but ``python3`` is, transparently rewrite the leading
+    ``python`` token. This keeps the tool contract (tests use ``python``) while
+    allowing dev on POSIX without a venv shim.
+    """
+    if os.name == "nt":
+        return command
+    # Already has a python3 prefix or no python prefix — nothing to do.
+    stripped = command.lstrip()
+    if not stripped.startswith("python"):
+        return command
+    # If ``python`` resolves, keep it; otherwise fall back to ``python3``.
+    if shutil.which("python"):
+        return command
+    if not shutil.which("python3"):
+        return command
+    # Rewrite only the leading ``python`` token (preserves args like ``-m``).
+    # Handle ``python -m ...``, ``python -c ...`` and bare ``python ...``.
+    if stripped.startswith("python3"):
+        return command
+    # Replace first occurrence of ``python`` at start (after leading whitespace).
+    prefix_len = len(command) - len(command.lstrip())
+    rest = command.lstrip()[6:]  # after "python"
+    return command[:prefix_len] + "python3" + rest
+
+
 def _execute_process(
     command: str, cwd: Path, timeout: int
 ) -> tuple[subprocess.Popen, str, str, int | None, bool, bool]:
@@ -512,7 +542,14 @@ def _execute_process(
     The directory containing the running interpreter is prepended to PATH so
     ``python``/``pip``/``pytest`` resolve even when the system PATH lacks them
     (common on Windows). No personal/user paths are hard-coded.
+
+    On POSIX systems where only ``python3`` exists (e.g. Homebrew), the command
+    is transparently rewritten from ``python`` to ``python3`` so dev testing
+    works cross-platform; the Windows runtime contract is unchanged.
     """
+    # Dev cross-platform: rewrite ``python`` -> ``python3`` when needed before
+    # PATH manipulation so the correct binary is found.
+    command = _python_fallback_command(command)
     env = os.environ.copy()
     # Use the *unresolved* interpreter directory. ``sys.executable`` inside a
     # virtualenv is a symlink (e.g. .venv/bin/python -> system python); resolving
