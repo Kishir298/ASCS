@@ -49,7 +49,9 @@ def _environment_text() -> str:
         f"{pyexe}\n"
         f"- `python` on PATH elsewhere: {launcher}\n"
         f"- git available: {bool(shutil.which('git'))}\n"
-        f"{tips}"
+        f"{tips}\n"
+        "- Scratch/model-generated test outputs go in `Ollama_tests/` "
+        "(gitignored sandbox, never committed); keep real source edits in place."
     )
 
 

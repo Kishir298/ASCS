@@ -42,3 +42,8 @@ request path is non-streaming `chat_resilient`.
 For the full from-scratch Windows setup, connection, and verification of the
 local `qwen3-coder:30b` (fallback `qwen2.5-coder:14b`) model with OpenCode and the ASCS CLI, see
 `docs/OLLAMA_SETUP.md`. Run on a ≥32 GB machine (16GB → fallback), not a low-RAM dev laptop.
+
+## Scratch outputs (Ollama_tests)
+
+- Model-generated scratch/demo/test outputs go in `Ollama_tests/` (gitignored sandbox, never committed).
+- Keep real source edits in their normal repo paths; `Ollama_tests/` is for disposable outputs only.

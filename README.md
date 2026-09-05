@@ -364,3 +364,8 @@ the Ollama HTTP client against an in-process mock server, the state machine,
 the staged boot, the web server endpoints, and the task engine (planner,
 executor, task-graph DAG behaviour, mode gating, git-dirty protection,
 verification retry, interrupt+resume, and end-to-end pipeline integration).
+
+## Scratch outputs
+
+Model-generated scratch/demo/test outputs go in `Ollama_tests/` (gitignored
+sandbox, never committed). Keep real source edits in their normal repo paths.
