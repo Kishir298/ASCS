@@ -283,8 +283,12 @@ def test_models_picker_mocked(tmp_path, monkeypatch):
     monkeypatch.setattr("agent.providers.list_all_providers_with_models", fake_list_all)
     cfg = AgentConfig(workspace=tmp_path, provider="ollama", model="qwen3-coder:30b")
     app = TuiApp(cfg)
-    # Mock picker to auto-select second model
-    monkeypatch.setattr(app, "_run_picker", lambda stdscr, pm: ("ollama", "qwen2.5-coder:14b"))
+    # Mock picker to auto-select second model (accepts active_only scope flag)
+    seen: dict = {}
+    def fake_picker(stdscr, pm, *a, **k):
+        seen.update(k)
+        return ("ollama", "qwen2.5-coder:14b")
+    monkeypatch.setattr(app, "_run_picker", fake_picker)
     # Need a dummy stdscr for call
     class Dummy:
         def getmaxyx(self):
@@ -292,6 +296,7 @@ def test_models_picker_mocked(tmp_path, monkeypatch):
     app._handle_slash(Dummy(), "/models")
     assert app.model == "qwen2.5-coder:14b"
     assert app.provider == "ollama"
+    assert seen.get("active_only") is True  # /models is scoped to active provider
 
 
 # -- Cancellation + streaming wiring ---------------------------------------
