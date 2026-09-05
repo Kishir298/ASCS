@@ -13,17 +13,13 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-# Windows curses support for the TUI (optional; Unix has curses in stdlib)
 tui = ["windows-curses>=2.3; sys_platform == 'win32'"]
 
 [project.scripts]
-risa = "agent.main:main"
+risa = "agent.terminal:main"
 
 [tool.setuptools.packages.find]
 include = ["agent*"]
-
-[tool.setuptools.package-data]
-agent = ["ui/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
