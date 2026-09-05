@@ -280,7 +280,7 @@ def test_models_picker_mocked(tmp_path, monkeypatch):
         called["hit"] = True
         return {"ollama": ["qwen3-coder:30b", "qwen2.5-coder:14b"], "openai": []}
 
-    monkeypatch.setattr("agent.providers.list_all_providers_with_models", fake_list_all)
+    monkeypatch.setattr("agent.models.providers.list_all_providers_with_models", fake_list_all)
     cfg = AgentConfig(workspace=tmp_path, provider="ollama", model="qwen3-coder:30b")
     app = TuiApp(cfg)
     # Mock picker to auto-select second model (accepts active_only scope flag)

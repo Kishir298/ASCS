@@ -170,7 +170,7 @@ def test_toolchain_to_text_unknown():
 # ── 2. Verification derivation uses toolchain ──────────────────────────────
 
 def test_derive_verification_uses_detected_test_cmd():
-    from agent.planner import _derive_verification
+    from agent.planning.planner import _derive_verification
 
     intelligence = (
         "- Project: demo\n- Toolchain: Language: python; Package manager: "
@@ -185,7 +185,7 @@ def test_derive_verification_uses_detected_test_cmd():
 
 
 def test_derive_verification_non_code():
-    from agent.planner import _derive_verification
+    from agent.planning.planner import _derive_verification
 
     steps = _derive_verification(
         {"title": "Inspect", "kind": "inspect"},
@@ -570,7 +570,7 @@ def test_toolchain_driven_verification_python(tmp_path):
     tc = detect_toolchain(tmp_path)
     assert "python -m pytest" in tc.test_commands
 
-    from agent.planner import _derive_verification
+    from agent.planning.planner import _derive_verification
 
     intelligence = f"- Project: demo\n- Toolchain: {toolchain_to_text(tc)}"
     steps = _derive_verification(
@@ -593,7 +593,7 @@ def test_toolchain_driven_verification_node(tmp_path):
     assert tc.language == "javascript"
     assert "npm test" in tc.test_commands
 
-    from agent.planner import _derive_verification
+    from agent.planning.planner import _derive_verification
 
     intelligence = f"- Project: demo\n- Toolchain: {toolchain_to_text(tc)}"
     steps = _derive_verification(

@@ -130,7 +130,7 @@ def test_store_refresh_is_incremental(sample_project, monkeypatch):
         recorded["index"] += 1
         return original_update()
 
-    monkeypatch.setattr("agent.project.scan", counting_scan)
+    monkeypatch.setattr("agent.context.project.scan", counting_scan)
     monkeypatch.setattr(store.index, "update", counting_update)
 
     store.refresh()

@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from agent.ollama import (
+from agent.models.client import (
     OllamaClient,
     OllamaConnectionError,
     OllamaHTTPError,
@@ -343,7 +343,7 @@ def test_chat_resilient_respects_should_stop():
 def test_chat_resilient_fallback_for_plain_chat_clients():
     """Clients without chat_resilient still work through loop/executor helper."""
     client = _FlakyChat("conn", fails_before_success=0)
-    from agent.loop import _resilient_chat
+    from agent.core.loop import _resilient_chat
 
     out = _resilient_chat(client, [{"role": "user", "content": "hi"}], format="json")
     assert out == '{"done": true, "summary": "ok"}'

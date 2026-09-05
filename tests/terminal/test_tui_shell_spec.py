@@ -154,7 +154,7 @@ def test_bare_slash_shows_menu(tmp_path):
 
 def test_models_empty_state_points_to_connect(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "agent.providers.list_all_providers_with_models",
+        "agent.models.providers.list_all_providers_with_models",
         lambda timeout=2, use_cache=True: {"ollama": []},
     )
     app = TuiApp(AgentConfig(workspace=tmp_path, provider="ollama", model="qwen3-coder:30b"))

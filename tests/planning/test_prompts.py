@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agent.config import AgentConfig
-from agent.prompts import (
+from agent.planning.prompts import (
     _environment_text,
     _mode_instructions,
     malformed_feedback,
