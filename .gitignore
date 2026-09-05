@@ -19,5 +19,9 @@ node_modules/
 # A.S.C.S. runtime state (regenerated on run)
 .ascs/
 
+# Local model scratch outputs (Option C, gitignored, never committed)
+ascs_demo_hello.txt
+Ollama_tests/
+
 # macOS
 .DS_Store
