@@ -269,6 +269,107 @@ def build_picker_items(provider_models: dict[str, list[str]]) -> list[PickerItem
     return items
 
 
+def build_scoped_picker_items(provider_models: dict[str, list[str]], active_provider: str) -> list[PickerItem]:
+    """Picker items scoped to the active provider only (strict /models scope).
+
+    Other providers are omitted entirely — the active provider's header is
+    always present (even with zero models) so the caller can show an
+    explicit empty state instead of an empty picker.
+    """
+    prov = (active_provider or "").strip().lower() or DEFAULT_PROVIDER
+    items: list[PickerItem] = [PickerItem(kind="provider", provider=prov, label=prov, is_provider_header=True)]
+    for m in provider_models.get(prov, []) or []:
+        items.append(PickerItem(kind="model", provider=prov, label=m, is_provider_header=False))
+    return items
+
+
+# ---------------------------------------------------------------------------
+# Layout tier naming — "comfortable" is the default roomy layout, i.e. "normal"
+# ---------------------------------------------------------------------------
+
+COMFORTABLE_TIER = "normal"
+
+
+def is_comfortable_layout(tier: str) -> bool:
+    """True for the comfortable (default) layout tier."""
+    return tier == COMFORTABLE_TIER
+
+
+def chatbox_bottom_layout(mode: str, model: str, intelligence: str, chat_w: int, inner_w: int, tier: str = "normal") -> tuple[str, str, int]:
+    """Pure layout for the chatbox bottom line: (mode_str, footer, footer_x).
+
+    Mode indicator is anchored bottom-left (x=2 inside the box); the
+    ``model(intel)`` footer is right-aligned at ``footer_x``. Mirrors the
+    rendering in ``TuiApp._draw`` so it can be unit-tested without curses.
+    """
+    footer = format_model_footer(model, intelligence)
+    mode_str = f" {mode} "
+    if tier == "compact":
+        max_footer = inner_w - 8
+        if len(footer) > max_footer:
+            footer = footer[: max(0, max_footer - 1)] + "…"
+    if len(footer) + 4 < inner_w:
+        footer_x = chat_w - len(footer) - 3
+    else:
+        footer = footer[: max(0, inner_w - 6)] + "…"
+        footer_x = chat_w - len(footer) - 3
+    # Guarantee the mode indicator (x=2) and footer never overlap: shrink
+    # the footer further so it starts at or after the end of the mode label.
+    min_fx = 2 + len(mode_str)
+    if footer_x < min_fx:
+        available = max(0, chat_w - min_fx - 3)
+        if len(footer) > available:
+            footer = (footer[: max(0, available - 1)] + "…") if available >= 1 else "…"
+        footer_x = max(min_fx, chat_w - len(footer) - 3)
+    return (mode_str, footer, footer_x)
+
+
+SLASH_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("/models", "Pick a model from the active provider"),
+    ("/connect", "Connect a local or cloud provider (validates first)"),
+    ("/intel", "Set intelligence: low | medium | high | xhigh | default"),
+)
+
+
+def slash_menu_text() -> str:
+    """One-line-per-command menu shown when '/' is typed alone."""
+    lines = ["Commands:"]
+    for name, desc in SLASH_COMMANDS:
+        lines.append(f"  {name} — {desc}")
+    return "\n".join(lines)
+
+
+def _is_local_url(url: str) -> bool:
+    """True when ``url`` points at this machine (local endpoint, key optional)."""
+    host = (url or "").strip().lower()
+    if "://" in host:
+        host = host.split("://", 1)[1].split("/", 1)[0].split("@")[-1]
+    host = host.split(":", 1)[0]
+    return host in ("localhost", "127.0.0.1", "::1") or host.endswith(".local")
+
+
+def validate_connect_inputs(provider: str, base_url: str, api_key: str) -> str | None:
+    """Strict pre-flight check for the /connect dialog.
+
+    Returns an inline error message, or None when the inputs may be probed.
+    Cloud providers pointed at non-local URLs require an API key; local
+    endpoints (Ollama / LM Studio / localhost) do not.
+    """
+    from .providers import API_KEY_ENVS
+
+    prov = (provider or "").strip().lower()
+    base = (base_url or "").strip()
+    if not base:
+        return "Base URL is required."
+    low = base.lower()
+    if not (low.startswith("http://") or low.startswith("https://")):
+        return "Base URL must start with http:// or https://."
+    if prov != "ollama" and not (api_key or "").strip() and not _is_local_url(base):
+        env_name = (API_KEY_ENVS.get(prov) or "API_KEY")
+        return f"API key is required for {prov} — enter it above or set {env_name}."
+    return None
+
+
 def parse_slash_command(text: str) -> tuple[str, list[str]]:
     """Return (cmd, args) for slash input. E.g. '/intel high' -> ('intel', ['high'])"""
     t = text.strip()
@@ -795,20 +896,11 @@ class TuiApp:
                     pass
 
             # Bottom line inside chatbox: mode left, model(intel) right (both on chatbox bg)
-            footer = format_model_footer(self.model, self.intelligence)
-            mode_str = f" {self.mode} "
+            mode_str, footer, footer_x = chatbox_bottom_layout(self.mode, self.model, self.intelligence, chat_w, inner_w, tier)
             col_chat = {"PLAN": 10, "BUILD": 11, "AUTO": 12}.get(self.mode, 8)
             try:
                 chat_win.addstr(chat_h - 2, 2, mode_str, curses.color_pair(col_chat) | curses.A_BOLD if curses.has_colors() else curses.A_BOLD)
-                if tier == "compact":
-                    max_footer = inner_w - 8
-                    if len(footer) > max_footer:
-                        footer = footer[: max_footer - 1] + "…"
-                if len(footer) + 4 < inner_w:
-                    chat_win.addstr(chat_h - 2, chat_w - len(footer) - 3, footer, curses.color_pair(8) if curses.has_colors() else 0)
-                else:
-                    short = footer[: max(0, inner_w - 6)] + "…"
-                    chat_win.addstr(chat_h - 2, chat_w - len(short) - 3, short, curses.color_pair(8) if curses.has_colors() else 0)
+                chat_win.addstr(chat_h - 2, footer_x, footer, curses.color_pair(8) if curses.has_colors() else 0)
             except curses.error:
                 pass
             chat_win.noutrefresh()
@@ -929,10 +1021,13 @@ class TuiApp:
             return False
         return False
 
-    def _run_picker(self, stdscr, provider_models: dict[str, list[str]]) -> tuple[str, str] | None:
+    def _run_picker(self, stdscr, provider_models: dict[str, list[str]], active_only: bool = False) -> tuple[str, str] | None:
         if not HAS_CURSES or curses is None:
             return None
-        items = build_picker_items(provider_models)
+        if active_only:
+            items = build_scoped_picker_items(provider_models, self.provider)
+        else:
+            items = build_picker_items(provider_models)
         sel = 0
         for idx, it in enumerate(items):
             if it.is_provider_header and it.provider == self.provider:
@@ -1118,6 +1213,7 @@ class TuiApp:
         buf = [base_url, api_key]
         labels = ["Base URL:", "API Key (leave empty for none):"]
         fields = 1 if prov == "ollama" else 2
+        connect_error: str | None = None
         while True:
             h, w = stdscr.getmaxyx()
             dialog_y = max(0, (h - dialog_h) // 2)
@@ -1143,6 +1239,11 @@ class TuiApp:
                     attr = curses.color_pair(5) if idx == field and HAS_CURSES and curses.has_colors() else (curses.A_REVERSE if idx == field else 0)
                     win.addstr(y + 1, 2, disp.ljust(max(0, dialog_w - 4))[: max(0, dialog_w - 4)], attr)
                 win.addstr(dialog_h - 2, 2, "Enter: confirm  Tab: next  Esc: cancel"[: max(0, dialog_w - 4)], curses.A_DIM)
+                if connect_error:
+                    try:
+                        win.addstr(dialog_h - 3, 2, connect_error[: max(0, dialog_w - 4)], curses.A_BOLD)
+                    except curses.error:
+                        pass
                 win.noutrefresh()
                 curses.doupdate()
             except curses.error:
@@ -1157,10 +1258,19 @@ class TuiApp:
                 field = (field + 1) % fields
                 continue
             if ch in (10, 13):
-                new_base = buf[0].strip() or cur_base
+                new_base = buf[0].strip()
                 new_key = buf[1].strip() if fields > 1 else ""
+                err = validate_connect_inputs(prov, new_base, new_key)
+                if err:
+                    connect_error = err
+                    self.status_msg = err
+                    continue
                 from .providers import list_models_for_provider
                 models = list_models_for_provider(prov, base_url=new_base, api_key=new_key or None, timeout=5, use_cache=False)
+                if not models:
+                    connect_error = f"Connection failed: no models returned for {prov} — check URL/key and retry."
+                    self.status_msg = connect_error
+                    continue
                 try:
                     state = load_tui_state()
                     provs = state.get("providers", {})
@@ -1175,7 +1285,7 @@ class TuiApp:
                     if env_key and new_key:
                         os.environ[env_key] = new_key
                     self.provider = prov
-                    self.status_msg = f"Connected to {prov} ({len(models)} models)" if models else f"Connected to {prov} (no models listed)"
+                    self.status_msg = f"Connected to {prov} ({len(models)} models)"
                     self._add_system(self.status_msg)
                 except Exception as e:
                     self.status_msg = f"Connect failed: {e}"
@@ -1190,6 +1300,11 @@ class TuiApp:
                 continue
 
     def _handle_slash(self, stdscr, text: str) -> None:
+        if (text or "").strip() == "/":
+            menu = slash_menu_text()
+            self._add_system(menu)
+            self.status_msg = "Slash commands listed"
+            return
         cmd, args = parse_slash_command(text)
         if not cmd:
             self._add_system("Unknown command — try /help")
@@ -1250,7 +1365,12 @@ class TuiApp:
             except Exception:
                 provider_models = {p: [] for p in PROVIDER_NAMES}
                 self._add_system("Unable to load models.")
-            res = self._run_picker(stdscr, provider_models)
+            active_models = provider_models.get(self.provider, []) or []
+            if not active_models:
+                self.status_msg = f"No models listed for {self.provider} — try /connect first"
+                self._add_system(self.status_msg)
+                return
+            res = self._run_picker(stdscr, provider_models, active_only=True)
             if res:
                 prov, model = res
                 if model:
