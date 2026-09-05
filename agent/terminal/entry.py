@@ -9,15 +9,15 @@ from __future__ import annotations
 
 import sys
 
-from .config import load_config
-from .main import (
+from agent.config import load_config
+from agent.main import (
     _cmd_check,
     _cmd_doctor,
     _cmd_list_models,
     _cmd_tui,
     build_parser,
 )
-from .ollama import OllamaClient
+from agent.models.client import OllamaClient
 
 
 ASCII_BANNER = r"""
@@ -78,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         # Use the existing configuration system. Do not duplicate config
         # construction here.
-        from .main import build_config
+        from agent.main import build_config
 
         config = build_config(args)
     except ValueError as exc:

@@ -19,8 +19,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from .models import Plan, ToolResult, truncate
-from .workspace import Workspace, WorkspaceError, should_ignore
+from agent.models import Plan, ToolResult, truncate
+from agent.workspace import Workspace, WorkspaceError, should_ignore
 
 TRUNCATION_MARKER = "\n... [TRUNCATED by coding-agent; use targeted tools/arguments to see the rest]"
 
@@ -346,7 +346,7 @@ def _delete_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
             "is genuinely required."
         )
     if target.is_symlink():
-        from .workspace import _remove_link
+        from agent.workspace import _remove_link
         _remove_link(target)
         return ToolResult(
             "delete_file", f"Removed link {path}", note="link deleted"

@@ -3,24 +3,23 @@
 A local autonomous coding agent backed by Ollama. Intended to integrate with
 RISARMS and eventually be usable by ASIS and TIVISS.
 
-Primary components:
+Runtime layout (Phase 0): flat canonical modules are preserved via shims,
+while domain packages provide the architectural address. New code should
+import from the domain packages::
 
-    config      - environment/CLI configuration (PLAN / BUILD / AUTO modes)
-    workspace   - strict workspace containment for all file operations
-    tools       - tool registry + validation + execution (terminal, python,
-                  git, file editing, search, plan)
-    ollama      - isolated, stdlib-only Ollama HTTP client
-    loop        - the autonomous agent execution loop (lifecycle + events)
-    events      - structured, JSON-serializable agent events
-    state       - explicit lifecycle state machine
-    boot        - staged startup with real checks and progress reporting
-    web         - local web UI server (stdlib only, SSE, cancellation)
-    context     - persistent project index + hierarchical, dependency-aware
-                  retrieval with deterministic chunking
-    project     - project scanner + manifest + persistent project store
-    tasks       - structured task graph (statuses, dependencies, persistence)
-    doctor      - read-only diagnostics (``risa --doctor``)
-    main        - CLI entry point (``risa``)
+    agent.core         - AgentLoop, lifecycle/state, cancellation
+    agent.planning     - planner, prompts
+    agent.execution    - executor, task graph
+    agent.tools        - tool registry + execution
+    agent.context      - project index, manifest, toolchain
+    agent.experience   - learning memory store
+    agent.verification - verification boundary (distributed logic)
+    agent.models       - Ollama client, providers, response contract
+    agent.terminal     - terminal entry, TUI (primary UI)
+
+Top-level survivors: config, workspace, boot, doctor, web (EventHub/
+TaskRunner shared; HTTP serving legacy), main, events. ``phases/`` is never
+imported by runtime code.
 """
 
 from __future__ import annotations
