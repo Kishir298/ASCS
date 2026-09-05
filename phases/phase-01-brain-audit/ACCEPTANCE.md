@@ -1,12 +1,14 @@
 # Phase 1 — Acceptance Criteria
 
-- [ ] Intent pipeline mapped end-to-end (task → plan → tools → verification).
-- [ ] `AgentLoop`, planner, executor, tool execution, prompts, and project
-  index responsibilities documented with file/line references.
-- [ ] Duplicated planning/execution/recovery decision logic listed with
-  unification proposal.
-- [ ] Root cause of trivial-intent misrouting (e.g. `hello → write_file`)
-  identified with a minimal fix plan and regression-test sketch.
-- [ ] No mode, PowerShell, language-intel, learning, or reliability redesigns
+- [x] Intent pipeline mapped end-to-end (task → plan → tools → verification).
+- [x] `AgentLoop`, planner, executor, tool execution, prompts, and project
+  index responsibilities documented (see `docs/architecture/BRAIN_CONTRACT.md`).
+- [x] Duplicated planning/execution/recovery decision logic listed with
+  unification proposal (planner fallback unified via `fallback_spec_for`).
+- [x] Root cause of trivial-intent misrouting (`hello → write_file`)
+  identified and fixed via the intent/decision layer
+  (`agent/core/intent.py`) + loop gate; regression tests in
+  `tests/core/test_intent.py` and `tests/core/test_intent_side_effects.py`.
+- [x] No mode, PowerShell, language-intel, learning, or reliability redesigns
   performed as part of the audit.
-- [ ] Findings recorded in `phases/phase-01-brain-audit/NOTES.md`.
+- [x] Findings recorded in `phases/phase-01-brain-audit/NOTES.md`.

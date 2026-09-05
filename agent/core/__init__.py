@@ -18,6 +18,10 @@ from __future__ import annotations
 
 _LAZY: dict[str, str] = {
     "AgentLoop": "agent.core.loop",
+    # Phase 1 brain: intent/decision layer.
+    "Decision": "agent.core.intent",
+    "classify_request": "agent.core.intent",
+    "INTENT_CATEGORIES": "agent.core.intent",
     "GraphLoopResult": "agent.core.loop",
     "LoopResult": "agent.core.loop",
     "run_agent": "agent.core.loop",

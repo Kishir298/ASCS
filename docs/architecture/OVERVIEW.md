@@ -34,8 +34,10 @@ dependencies are the standard library plus `windows-curses` on Windows.
 ## Request flow (actual)
 
 ```text
-USER → Terminal/TUI → AgentLoop → Context + Experience + Config → Planner →
-Task/DAG → Executor → Tools → Verification → Recovery/Result → AgentLoop
+USER → Terminal/TUI → AgentLoop → Intent gate (classify_request) →
+  [conversational → one-turn answer, zero tools] →
+  Context + Experience (demand-driven) + Config → Planner (conditional) →
+  Task/DAG → Executor → Tools → Verification → Recovery/Result → AgentLoop
 ```
 
 The classic single-shot loop (`risa "…"`) is the default; the task-graph

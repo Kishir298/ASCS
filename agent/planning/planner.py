@@ -312,16 +312,14 @@ def plan_objective(
     parsed = _parse_chat_to_value(raw)
     specs = parse_tasks(parsed)
     if not specs:
-        # Fall back to a single review-style task so execution still proceeds.
-        specs = [
-            {
-                "title": f"Implement and verify: {objective}",
-                "description": objective,
-                "complexity": "medium",
-                "kind": "implement",
-                "verification": ["confirm the objective is satisfied"],
-            }
-        ]
+        # Phase 1: intent-aware fallback — planner failure must never convert
+        # conversation/questions into implementation work (same contract as
+        # the loop's planner path).
+        from agent.core.intent import fallback_spec_for
+
+        spec = fallback_spec_for(objective)
+        spec.setdefault("complexity", "medium")
+        specs = [spec]
 
     graph = build_graph_from_specs(specs)
 

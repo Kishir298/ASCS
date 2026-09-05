@@ -82,6 +82,13 @@ from agent.planning.prompts import (
     task_message,
     tool_error_feedback,
 )
+from agent.core.intent import (
+    MUTATING_TOOLS as _MUTATING_TOOLS,
+    WRITE_EXCLUDED_INTENTS as _WRITE_EXCLUDED_INTENTS,
+    Decision,
+    classify_request,
+    fallback_spec_for,
+)
 from agent.core.state import StateTracker
 from agent.execution.tasks import Task
 from agent.tools import execute_tool
@@ -220,6 +227,9 @@ class AgentLoop:
         self._repeat_count = 0
         self._plan: Plan | None = None
         self._task_text: str = ""
+        self._decision: Decision | None = None
+        self._conversational: bool = False
+        self._gate_violations: int = 0
         self.experience: ExperienceStore | None = (
             ExperienceStore(path=config.experience_path)
             if config.experience_enabled
@@ -289,6 +299,10 @@ class AgentLoop:
         """
         if self.experience is None:
             return ""
+        # Phase 1: experience informs strategy; it must never fire for
+        # requests that authorize no workspace work at all.
+        if self._decision is not None and not self._decision.requires_workspace:
+            return ""
         try:
             hits = self.experience.search(task_text, limit=limit)
             if not hits:
@@ -297,6 +311,35 @@ class AgentLoop:
         except Exception as exc:  # noqa: BLE001 - experience must never block a run
             self.log(f"[experience] retrieval failed: {exc}")
             return ""
+
+    def _system_prompt_for(self, task: str) -> str:
+        """Build the system prompt, demand-driven by the request intent.
+
+        Phase 1 contract: conversational/world-knowledge requests never pay
+        for project indexing or experience retrieval, and receive an explicit
+        no-side-effect instruction. Coding requests get the full intelligence
+        blocks as before.
+        """
+        decision = self._decision
+        if decision is not None and not decision.requires_workspace:
+            project = None
+            experience = None
+        else:
+            project = self._project_prompt_block()
+            experience = self._experience_block(task)
+        prompt = system_prompt(self.config, project, experience)
+        if decision is not None and decision.is_conversational:
+            prompt += (
+                "\n\nREQUEST CLASSIFICATION (deterministic, pre-model)\n"
+                f"- The operator's message was classified as {decision.intent!r} "
+                f"(confidence: {decision.confidence}).\n"
+                "- It does NOT authorize workspace changes. Do not create, "
+                "modify, or delete anything; do not call set_plan; do not run "
+                'commands. Answer directly and reply {"done": true, '
+                '"summary": "<your answer>"} with no tool calls. '
+                "Append the marker (no tools were used) to the summary."
+            )
+        return prompt
 
     def _save_experience(
         self,
@@ -368,14 +411,18 @@ class AgentLoop:
 
     def run(self, task: str) -> LoopResult:
         self._task_text = task
+        # Phase 1 brain: classify BEFORE any orchestration decision.
+        self._decision = classify_request(task)
+        self._conversational = self._decision.is_conversational
+        if self._conversational:
+            emit_activity(
+                self.event_sink,
+                f"Intent: {self._decision.intent} (no tools needed)",
+            )
         self._messages = [
             {
                 "role": "system",
-                "content": system_prompt(
-                    self.config,
-                    self._project_prompt_block(),
-                    self._experience_block(task),
-                ),
+                "content": self._system_prompt_for(task),
             },
             task_message(task),
         ]
@@ -477,6 +524,39 @@ class AgentLoop:
                         _state.COMPLETE,
                         plan=self._plan,
                     )
+
+                # Phase 1 brain: unified intent gate. A verified-conversational
+                # request is answered in ONE model turn with zero tool calls;
+                # read-only intents get mutating calls refused with feedback;
+                # a repeated violation ends the session (bounded, no loops).
+                if self._gate_rejects(reply.tool):
+                    if self._conversational:
+                        return self._finish_conversational(
+                            reply, reply_text, iteration
+                        )
+                    self._gate_violations += 1
+                    if self._gate_violations >= 2:
+                        self._step(
+                            f"[{iteration:02d}] Intent gate: repeated refusal "
+                            f"({self._decision.intent} request); ending session."
+                        )
+                        return self._finish(
+                            "fatal",
+                            "The model repeatedly attempted unauthorized actions "
+                            f"on a {self._decision.intent} request.",
+                            iteration,
+                            _state.FAILED,
+                            error="intent gate violation",
+                        )
+                    self._step(
+                        f"[{iteration:02d}] Intent gate: '{self._decision.intent}' "
+                        f"request does not authorize '{reply.tool}'."
+                    )
+                    self._messages.append({"role": "assistant", "content": reply_text})
+                    self._messages.append(
+                        {"role": "user", "content": self._gate_feedback(reply.tool)}
+                    )
+                    continue
 
                 enabled = list(self.config.effective_tools)
                 if reply.tool not in enabled:
@@ -599,6 +679,16 @@ class AgentLoop:
         """
         self.tracker.configure(mode=self.config.mode, task=objective)
         self._task_text = objective
+        # Phase 1 brain: the task engine is for decomposable work. A verified
+        # conversational request must never enter planning/execution.
+        self._decision = classify_request(objective)
+        if self._decision.is_conversational:
+            self._conversational = True
+            self._step(
+                f"Intent: {self._decision.intent} — no plan or task graph "
+                "is created for conversational input."
+            )
+            return self._finish_conversational_from_graph(objective)
         emit_started(self.event_sink, "A.S.C.S. task engine started")
         emit_mode_changed(self.event_sink, self.config.mode)
         self._step(f"Objective: {objective[:300]}")
@@ -694,6 +784,51 @@ class AgentLoop:
             self._set_state(_state.FAILED, result.error)
             return result
 
+    def _finish_conversational_from_graph(self, objective: str) -> GraphLoopResult:
+        """Conversational fast-path for the task engine (``run_graph``).
+
+        Planning and execution are skipped entirely; the objective is answered
+        with a single model turn and the workspace is never touched.
+        """
+        self._step("Conversational request: answering without the task engine.")
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are the A.S.C.S. coding agent. The operator's message "
+                    "is conversational and authorizes no workspace changes. "
+                    "Reply with ONLY {\"done\": true, \"summary\": \"<your "
+                    "answer> (no tools were used)\"}."
+                ),
+            },
+            {"role": "user", "content": objective},
+        ]
+        summary = ""
+        try:
+            answer_text = _resilient_chat(
+                self.client,
+                messages,
+                format="json",
+                should_stop=self.should_stop,
+            )
+            answer = parse_model_reply(answer_text)
+            summary = (answer.summary or answer.comment or "").strip()
+        except OllamaError:
+            summary = ""
+        if not summary:
+            summary = "Answered conversationally (no tools were used)."
+        elif "(no tools were used)" not in summary.lower():
+            summary = f"{summary} (no tools were used)"
+        self.tracker.finish(_state.COMPLETE, summary)
+        emit_completed(self.event_sink, summary, summary=summary)
+        return GraphLoopResult(
+            status="completed",
+            objective=objective,
+            summary=summary,
+            iterations=1,
+            steps=list(self._steps),
+        )
+
     def _plan_objective(self, objective: str, store) -> dict:
         """Ask the model to decompose ``objective`` into a task graph."""
         from agent.planning.planner import project_intelligence
@@ -724,14 +859,9 @@ class AgentLoop:
         parsed = _chat_value(raw)
         specs = parse_tasks(parsed)
         if not specs:
-            specs = [
-                {
-                    "title": objective,
-                    "description": objective,
-                    "kind": "implement",
-                    "verification": ["confirm the objective is satisfied"],
-                }
-            ]
+            # Phase 1: intent-aware fallback — planner failure must never
+            # silently convert conversation/questions into implementation work.
+            specs = [fallback_spec_for(objective)]
         from agent.execution.tasks import build_graph_from_specs, chunk_graph
 
         try:
@@ -804,6 +934,85 @@ class AgentLoop:
         )
 
     # -- internals ----------------------------------------------------------
+
+    def _finish_conversational(
+        self,
+        reply,
+        reply_text: str,
+        iteration: int,
+    ) -> LoopResult:
+        """Extract the conversational answer and finish with zero side effects.
+
+        Reached when a high-confidence conversational request somehow produced
+        a tool call instead of a done object: the call is refused, the model is
+        asked once for its direct answer, and that answer becomes the summary.
+        The workspace is never touched on this path.
+        """
+        if reply.comment:
+            self._step(f"[{iteration:02d}] {reply.comment[:300]}")
+        self._messages.append({"role": "assistant", "content": reply_text})
+        self._messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "No tools are authorized for this message. Do NOT call any "
+                    "tool. Answer the user's message directly and reply "
+                    '{"done": true, "summary": "<your answer> (no tools '
+                    'were used)"}.',
+                ),
+            }
+        )
+        try:
+            answer_text = _resilient_chat(
+                self.client,
+                self._messages_for_request(),
+                format="json",
+                should_stop=self.should_stop,
+            )
+        except OllamaError:
+            answer_text = ""
+        answer = parse_model_reply(answer_text)
+        summary = (answer.summary or answer.comment or reply.comment or "").strip()
+        if not summary:
+            summary = "Answered conversationally (no tools were used)."
+        elif "(no tools were used)" not in summary.lower():
+            summary = f"{summary} (no tools were used)"
+        self._step("[done] Conversational request answered without tools.")
+        return self._finish(
+            "completed",
+            summary,
+            iteration,
+            _state.COMPLETE,
+        )
+
+    def _gate_rejects(self, tool: str) -> bool:
+        """True when the intent gate must refuse this tool call.
+
+        Conversational requests refuse EVERY tool; read-only intents
+        (conversation/question/project_inspection) refuse only mutating tools.
+        ``ambiguous`` is never refused here — the model decides inside mode
+        gating, keeping terse work orders executable.
+        """
+        if self._decision is None:
+            return False
+        if self._conversational:
+            return True
+        return (
+            tool in _MUTATING_TOOLS
+            and self._decision.intent in _WRITE_EXCLUDED_INTENTS
+        )
+
+    def _gate_feedback(self, tool: str) -> str:
+        """Refusal feedback for a gate-rejected tool call."""
+        return (
+            f"Your tool call '{tool}' was refused: the request was classified "
+            f"as {self._decision.intent!r} and authorizes no workspace "
+            "changes. Do NOT call any tool. Answer the user's message "
+            'directly and reply {"done": true, "summary": "<your answer> '
+            '(no tools were used)"}.'
+            " This was your final warning: if you call a tool again, the "
+            "session ends with an error."
+        )
 
     def _run_tool(self, tool: str, arguments: dict[str, Any], iteration: int) -> ToolResult:
         """Emit lifecycle/command/file events around a single tool call."""
@@ -929,7 +1138,11 @@ class AgentLoop:
         error: str = "",
         plan: Plan | None = None,
     ) -> LoopResult:
-        if terminal_state in (_state.COMPLETE, _state.FAILED) and self._task_text:
+        if (
+            terminal_state in (_state.COMPLETE, _state.FAILED)
+            and self._task_text
+            and not self._conversational
+        ):
             self._save_experience(
                 task=self._task_text,
                 success=terminal_state == _state.COMPLETE,

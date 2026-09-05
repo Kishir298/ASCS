@@ -5,8 +5,8 @@ Source of truth for sequencing: `phases/phase-*/OBJECTIVES.md` (details) and
 `Planned` (all others — objectives exist, work not started).
 
 ```text
-Phase 0 — Architecture & Repository Organization ............ Done*
-Phase 1 — Brain, Intent & Tool-Use Audit ................... Planned
+Phase 0 — Architecture & Repository Organization ............ Done
+Phase 1 — Brain, Intent & Tool-Use Audit ................... Done
 Phase 2 — True PLAN / BUILD / AUTO Modes ................... Planned
 Phase 3 — Windows / PowerShell Execution ................... Planned
 Phase 4 — Language Intelligence ............................ Planned
@@ -18,12 +18,19 @@ Phase 6 — Verification & Reliability ....................... Planned
 `7 failed, 578 passed, 5 skipped` preserved, diagnostics green, no
 `phases/` imports, diff reviewed).
 
+Phase 1 is `Done`: intent-aware orchestration implemented
+(`agent/core/intent.py`, unified loop gate, intent-aware planner fallback,
+demand-driven context, experience discipline) with 80 new regression tests;
+baseline failure set unchanged (`7 failed, 661 passed, 5 skipped`).
+
 ## What each phase owns
 
 - **Phase 0** — boundaries only: `agent/` subpackages, `phases/` shells,
   `tests/` domains, `docs/architecture/`, `scripts/`. No intelligence changes.
-- **Phase 1** — audit intent → plan → tools → verification; duplicated
-  decision logic; `hello → write_file` root cause + fix plan.
+- **Phase 1** — DONE: brain contract implemented — request classification
+  (`agent/core/intent.py`), no-tool conversational fast-path, unified intent
+  gate, conditional planning, demand-driven context, experience discipline;
+  contract in `docs/architecture/BRAIN_CONTRACT.md`.
 - **Phase 2** — true PLAN (read-only) / BUILD (plan-first) / AUTO, plus SAFE
   overlay and dirty-guard.
 - **Phase 3** — Windows/`cmd.exe` execution, structured failures,
