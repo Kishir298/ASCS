@@ -21,7 +21,7 @@ opt-in step. Max-chunking splits 300k-token objectives into ~8k shards within th
 ## Platform
 
 - **Runtime (risa --ui/--tui, Ollama): Windows-only** (32 GB target). `risa --doctor` warns on non-Windows.
-- **Dev testing (pytest): cross-platform.** `agent/tools.py:507` transparently maps `python` -> `python3` on POSIX where only `python3` exists, so the suite passes on macOS/Linux too (use `.venv/bin/python -m pytest` or plain `python3 -m pytest`).
+- **Dev testing (pytest): cross-platform.** `agent/tools/core.py:508` transparently maps `python` -> `python3` on POSIX where only `python3` exists, so the suite passes on macOS/Linux too (use `.venv/bin/python -m pytest` or plain `python3 -m pytest`).
 
 ## Test commands
 

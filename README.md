@@ -31,7 +31,7 @@ real STOP/cancellation.
 > **Platform note:** The full runtime (`risa --ui` / `--tui`, Ollama) is
 > **Windows-only** (32 GB recommended target). **Dev testing (`pytest`) is
 > cross-platform:** on macOS/Linux `python` transparently falls back to
-> `python3` at execution time (`agent/tools.py:507`), so `pytest` passes
+> `python3` at execution time (`agent/tools/core.py:508`), so `pytest` passes
 > inside or outside a venv. Use `.venv/bin/python -m pytest -q` on any OS for
 > the canonical run.
 
@@ -234,7 +234,7 @@ rediscovering it.
 ## Experience memory
 
 Beyond per-project state, ASCS keeps a cross-project **learning memory**
-(`agent/experience.py`). Every completed run records a structured experience —
+(`agent/experience/store.py`). Every completed run records a structured experience —
 task, outcome, the ordered plan, actions taken, model-visible observations,
 verification result, and a `success`/`score` — to a local JSONL store
 (`~/.risa/ascs/experiences.jsonl` by default).
@@ -270,7 +270,7 @@ The engine is fully implemented and reachable via `risa --tasks "…"`:
    hierarchical retrieval. Oversized (`large`) tasks are automatically
    re-chunked into per-file subtasks, and every task is guaranteed a
    verification step.
-2. **Execute** (`agent.executor`) — `agent/executor.py` walks the graph, runs
+2. **Execute** (`agent.executor`) — `agent/execution/executor.py` walks the graph, runs
    each ready task with a **task-scoped system prompt**, then verifies it
    against its acceptance criteria (each `run …` verification step must exit 0)
    before marking it complete. Implementing tasks with no declared verification
@@ -342,7 +342,7 @@ python -m pip install -r requirements.txt   # or: python -m pip install -e ".[de
 python -m pytest                            # venv python on Windows; macOS/Linux devs: .venv/bin/python -m pytest -q (python -> python3 fallback automatic)
 ```
 
-> Cross-platform dev: `pytest` is cross-platform (macOS/Linux fallback `python` -> `python3` is automatic in `agent/tools.py:507`). The full runtime (`risa --ui`/`--tui`) remains Windows-only.
+> Cross-platform dev: `pytest` is cross-platform (macOS/Linux fallback `python` -> `python3` is automatic in `agent/tools/core.py:508`). The full runtime (`risa --ui`/`--tui`) remains Windows-only.
 
 All tests run offline against scripted fake clients and an in-process mock
 Ollama server — **no Ollama required**. The skipped tests are the opt-in live
