@@ -13,3 +13,5 @@
 
 -e .
 pytest>=8,<10
+# Windows-only TUI support (curses is stdlib on Unix; no-op elsewhere).
+windows-curses>=2.3; sys_platform == "win32"
