@@ -37,9 +37,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
-DEFAULT_MODEL = "qwen3-coder:30b"  # primary 30B coder, fallback qwen2.5-coder:14b via --model
+DEFAULT_MODEL = "qwen3-coder:30b"  # primary 30B coder
+FALLBACK_MODEL = "qwen2.5-coder:14b"  # fallback for 16GB machines / primary missing
 DEFAULT_REQUEST_TIMEOUT = 600  # seconds; single model request budget
 DEFAULT_KEEP_ALIVE = "30m"  # Ollama model persistence between requests
+DEFAULT_STOP_OLLAMA_ON_EXIT = True  # stop the Ollama server when the CLI closes
 DEFAULT_MAX_ITERATIONS = 50
 DEFAULT_UI_HOST = "127.0.0.1"
 DEFAULT_UI_PORT = 8787
@@ -111,6 +113,8 @@ class AgentConfig:
     workspace: Path = Path.cwd()
     ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
     model: str = DEFAULT_MODEL
+    fallback_model: str = FALLBACK_MODEL  # used when the primary model is missing
+    stop_ollama_on_exit: bool = DEFAULT_STOP_OLLAMA_ON_EXIT  # stop Ollama server on CLI close
     provider: str = DEFAULT_PROVIDER  # ollama | openai | anthropic | grok | google | deepseek
     intelligence: str = DEFAULT_INTELLIGENCE  # low | medium | high | xhigh | default
     theme: str = DEFAULT_THEME  # auto | light | dark
@@ -405,6 +409,8 @@ def load_config(**overrides) -> AgentConfig:
     kwargs = {
         "ollama_base_url": _env_str("OLLAMA_BASE_URL", persisted.get("ollama_base_url", DEFAULT_OLLAMA_BASE_URL)),
         "model": _env_str("OLLAMA_MODEL", persisted.get("model", DEFAULT_MODEL)),
+        "fallback_model": _env_str("OLLAMA_FALLBACK_MODEL", persisted.get("fallback_model", FALLBACK_MODEL)),
+        "stop_ollama_on_exit": _env_bool("AGENT_STOP_OLLAMA_ON_EXIT", DEFAULT_STOP_OLLAMA_ON_EXIT),
         "provider": provider_raw,
         "intelligence": intelligence_raw,
         "theme": theme_raw,

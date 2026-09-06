@@ -23,11 +23,12 @@ from agent.workspace import Workspace
 class FakeClient:
     """Returns a pre-scripted list of chat responses in order."""
 
-    def __init__(self, responses, model="fake-model"):
+    def __init__(self, responses, model="fake-model", available_models=None):
         self.responses = list(responses)
         self.index = 0
         self.model = model
         self.calls = []
+        self.available_models = list(available_models or [])
 
     def chat(self, messages, *, format="json", options=None, timeout=None):
         self.calls.append(messages)
@@ -38,6 +39,9 @@ class FakeClient:
                 raise item
             return item
         raise AssertionError("FakeClient exhausted scripted responses")
+
+    def list_models(self, timeout=10):
+        return list(self.available_models)
 
 
 def make_loop(tmp_path, responses, config_overrides=None, approver=None):
@@ -227,6 +231,57 @@ def test_ollama_model_not_found_is_fatal(tmp_path):
     loop, _ = make_loop(tmp_path, [OllamaModelNotFoundError(404, "missing")])
     result = loop.run("anything")
     assert result.status == "fatal"
+
+
+def _fallback_loop(tmp_path, responses, available_models):
+    config = AgentConfig(workspace=tmp_path, mode="AUTO")
+    assert config.model == "qwen3-coder:30b"
+    assert config.fallback_model == "qwen2.5-coder:14b"
+    client = FakeClient(
+        responses, model=config.model, available_models=available_models
+    )
+    loop = AgentLoop(
+        config, client, Workspace(tmp_path), log=lambda m: None
+    )
+    return loop, client
+
+
+def test_missing_primary_switches_to_installed_fallback_once(tmp_path):
+    loop, client = _fallback_loop(
+        tmp_path,
+        [
+            OllamaModelNotFoundError(404, "missing"),
+            json.dumps({"done": True, "summary": "answered on fallback"}),
+        ],
+        ["qwen2.5-coder:14b"],
+    )
+    result = loop.run("hello")
+    assert result.status == "completed"
+    assert client.model == "qwen2.5-coder:14b"
+
+
+def test_missing_primary_stays_fatal_when_fallback_absent(tmp_path):
+    loop, client = _fallback_loop(
+        tmp_path,
+        [OllamaModelNotFoundError(404, "missing")],
+        ["some-other-model"],
+    )
+    result = loop.run("anything")
+    assert result.status == "fatal"
+    assert client.model == "qwen3-coder:30b"  # never switched
+
+
+def test_missing_fallback_model_is_fatal_without_flip_flop(tmp_path):
+    config = AgentConfig(workspace=tmp_path, mode="AUTO")
+    client = FakeClient(
+        [OllamaModelNotFoundError(404, "missing")],
+        model=config.fallback_model,
+        available_models=[config.fallback_model],
+    )
+    loop = AgentLoop(config, client, Workspace(tmp_path), log=lambda m: None)
+    result = loop.run("anything")
+    assert result.status == "fatal"
+    assert client.model == config.fallback_model
 
 
 def test_generic_ollama_http_error_is_fatal_not_crash(tmp_path):

@@ -232,6 +232,7 @@ class AgentLoop:
         self._decision: Decision | None = None
         self._conversational: bool = False
         self._gate_violations: int = 0
+        self._fallback_attempted: bool = False
         self.experience: ExperienceStore | None = (
             ExperienceStore(path=config.experience_path)
             if config.experience_enabled
@@ -243,6 +244,39 @@ class AgentLoop:
     def _step(self, text: str) -> None:
         self._steps.append(text)
         self.log(text)
+
+    def _try_fallback_model(self, exc: Exception) -> bool:
+        """Switch to the fallback model once when the primary is missing.
+
+        Returns True when the caller should retry the run on the fallback.
+        Only fires once per loop, only when the missing model is the
+        configured primary, and only when the fallback is actually installed.
+        Never raises: any probe failure means no switch.
+        """
+        if self._fallback_attempted:
+            return False
+        fallback = getattr(self.config, "fallback_model", "") or ""
+        if not fallback or self.client.model == fallback:
+            return False
+        try:
+            installed = self.client.list_models(timeout=10)
+        except Exception:  # noqa: BLE001 - probe failure means no switch
+            return False
+        if fallback not in (installed or []):
+            return False
+        self._fallback_attempted = True
+        missing = self.client.model
+        self.client.model = fallback
+        self._step(
+            f"Model {missing!r} is not installed; "
+            f"switching to fallback {fallback!r}."
+        )
+        emit_status(
+            self.event_sink,
+            "MODEL",
+            f"Primary model {missing!r} missing; using fallback {fallback!r}.",
+        )
+        return True
 
     def _set_state(self, state: str, message: str = "") -> None:
         """Transition lifecycle state + broadcast a status event."""
@@ -642,6 +676,8 @@ class AgentLoop:
                 "fatal", "Ollama is unavailable.", iteration, _state.FAILED, error=str(exc)
             )
         except OllamaModelNotFoundError as exc:
+            if self._try_fallback_model(exc):
+                return self.run(self._task_text or task)
             return self._finish(
                 "fatal",
                 f"Model '{self.client.model}' is not installed on the Ollama server.",
@@ -773,6 +809,8 @@ class AgentLoop:
 
             return result
         except OllamaModelNotFoundError as exc:
+            if self._try_fallback_model(exc):
+                return self.run_graph(objective, resume=resume)
             result.status = "fatal"
             result.error = f"Model '{self.client.model}' is not installed on the Ollama server."
             self._step(f"[error] {result.error}")
