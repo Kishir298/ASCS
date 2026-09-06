@@ -3,6 +3,11 @@
 Status: `Implemented` (2026-09-05) — brain audit + intent-aware orchestration
 landed. Phase 0 completed first (see `phases/phase-00-architecture/NOTES.md`).
 
+Status: `Repaired` — gap closure landed on top of `417725f` (see Gap closure
+below): granular file_operation / command_request / verification_request
+intents, explicit `run_graph()` question no-work boundary, unified
+intent-aware malformed-graph fallback, and the executor intent gate.
+
 ## Root cause of `hello → write_file`
 
 Traced through the Phase 0 code (`agent/core/loop.py`):
@@ -71,3 +76,33 @@ model's behavior was the only gate.
   and planner both call it. Left as-is.
 - Mode gating (PLAN/SAFE tool filtering) lives in config + executor + loop —
   consolidated enough for Phase 1; further unification deferred.
+
+## Gap closure (repair on top of 417725f)
+
+1. **run_graph no-work boundary** — `run_graph()` now explicitly refuses the
+   graph pipeline for high-confidence `conversation` AND `question`
+   (`agent/core/loop.py`), answering directly with no refresh, no planner, no
+   tools, and truthful `COMPLETE`-only state. Previously only the generic
+   `is_conversational` property guarded it and misclassified questions (e.g.
+   `what does authentication mean?` → ambiguous) entered full planning.
+2. **Granular intents** — `agent/core/intent.py` now genuinely produces all
+   eight categories with precedence conversation → file_operation →
+   command_request → verification_request → project_inspection → question →
+   code_change → ambiguous. `run pytest` is `command_request`, `delete
+   foo.py` is `file_operation`, `verify the changes` is
+   `verification_request`; `add authentication` / `add tests for the parser`
+   stay `code_change`; `what is authentication?` stays `question`.
+3. **Unified fallback** — the malformed-graph `except` in
+   `loop._plan_objective` no longer hardcodes `Implement and verify`; every
+   planner/graph fallback routes through `fallback_spec_for()`, which is now
+   per-intent (review / inspect / scoped implement / verify-run /
+   conservative review). No fallback can escalate a non-mutating intent.
+4. **Executor intent gate** — `TaskExecutor` accepts the run's `Decision` and
+   refuses mutating tools for read-only intents inside tasks, mirroring the
+   single-shot loop gate (`intent=None` preserves legacy direct-construction
+   behavior).
+5. **Tests** — `tests/core/test_intent.py` extended (granular positives,
+   precedence, question/code boundaries, per-intent fallbacks);
+   `tests/core/test_run_graph_intent.py` added (12 tests: run_graph no-work
+   incl. questions, planner-skip, malformed recovery per intent, executor
+   gate + compat).

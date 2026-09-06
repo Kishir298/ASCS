@@ -18,24 +18,36 @@ intelligence; the application provides boundaries.
 | `verification_request` | verify reported work | yes | read-only + commands | allowed by mode |
 | `ambiguous` | terse work orders ("do the thing", "make a.txt") | yes | mode-gated full set | model must justify per prompt contract |
 
-Classification is **deterministic, pure, and high-confidence-only**: only
-greetings/thanks/small-talk, world-knowledge questions, and clearly
-project-directed questions are asserted with `high` confidence. Everything
-else is `ambiguous`/`moderate`, so terse-but-legitimate work orders keep
-working under normal mode gating.
+Classification is **deterministic, pure, and high-confidence-only**, with
+explicit precedence: conversation → file_operation → command_request →
+verification_request → project_inspection → question → code_change →
+ambiguous. Specialized work intents are checked before the broad coding
+patterns, so `run pytest` is a command request (not a code change),
+`delete foo.py` is a file operation, and `verify the changes` is a
+verification request — never a new implementation objective. General
+questions (`What is authentication?`) stay `question`; project-anchored ones
+(`How is authentication implemented here?`) stay `project_inspection`.
+Terse-but-legitimate work orders (`do the thing`) stay `ambiguous` and
+executable under mode gating, with a conservative review-only fallback.
 
 ## Decision flow
 
 ```text
 input
 → classify_request()            (agent/core/intent.py — before any I/O)
-→ conversational?  → answer in ONE model turn, zero tools, done
+→ conversational/question (high)? → answer in ONE model turn, zero tools, done
+   (both run() and run_graph(); no refresh, no planner, no graph, no tools)
 → else             → load context only if requires_workspace (demand-driven)
                    → model decides tools inside mode gating
                    → mutating tool call + read-only intent?  → refused (max 2)
                    → repeated violation?                     → session ends (fatal)
 → planner only when work is decomposable (run_graph / --tasks)
-→ executor runs authorized tasks only
+→ planner/graph fallbacks all route through fallback_spec_for():
+   conversation/question/ambiguous → review (never implement),
+   inspection → inspect, file-op → scoped implement,
+   command → verify (run <cmd>), verification → review
+→ executor runs authorized tasks only, with the same intent gate threaded
+   in (read-only objectives refuse mutating tools inside tasks too)
 → verification distinguishes tool success from objective success
 → stop when done / cancelled / retry budget exhausted
 ```
