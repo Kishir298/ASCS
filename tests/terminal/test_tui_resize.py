@@ -466,6 +466,193 @@ def test_header_survives_transient_color_failure(tmp_path, monkeypatch):
     assert stdscr.drawn == []
 
 
+# -- conversation wrapping contract ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "hello",
+        "a" * 500,
+        "a" * 5000,
+        "C:\\" + "folder\\" * 60 + "file.py",
+        "https://example.com/" + "path-segment/" * 40 + "?q=1&r=2",
+        "Unicode: héllo wörld 日本語テスト 🎉 مرحبا",
+        "   ",
+        "word " * 200,
+        "supercalifragilisticexpialidocious" * 20,
+        "para one\n\npara two\nline three\n\n\npara four",
+    ],
+)
+@pytest.mark.parametrize("width", [10, 40, 76])
+def test_wrap_lines_bounded(tmp_path, text, width):
+    app = _app(tmp_path)
+    lines = app._wrap_lines(text, width)
+    assert lines  # never empty
+    for line in lines:
+        assert len(line) <= max(10, width)
+    # no content lost (modulo intra-line whitespace collapsing)
+    assert "".join(lines).replace(" ", "") == text.replace(
+        " ", ""
+    ).replace("\n", "")
+
+
+def test_wrap_lines_empty_and_degenerate_widths(tmp_path):
+    app = _app(tmp_path)
+    assert app._wrap_lines("", 40) == [""]
+    verbatim = app._wrap_lines("hello", 0)
+    assert verbatim == ["hello"]  # documented: caller floors width first
+    assert app._wrap_lines("hello", -5) == ["hello"]
+
+
+def test_render_message_lines_bounded(tmp_path):
+    app = _app(tmp_path)
+    app._add_message("user", "a" * 5000)
+    app._add_message("assistant", "https://example.com/" + "x" * 1000)
+    app._add_message("user", "héllo 🎉")
+    rendered = app._render_message_lines(40)
+    assert rendered
+    for line, _attr in rendered:
+        assert len(line) <= 40
+
+
+def test_draw_conversation_rows_within_terminal(tmp_path):
+    app = _app(tmp_path)
+    app._add_message("user", "b" * 5000)
+    app._add_message("assistant", "ok")
+
+    class RecordingStdscr(FakeStdscr):
+        def __init__(self, h, w):
+            super().__init__(h, w)
+            self.rows = []
+
+        def addstr(self, y, x, text, *args):
+            assert 0 <= y < self._h
+            assert 0 <= x < self._w
+            assert x + len(text) <= self._w
+            self.rows.append((y, x, text))
+
+    stdscr = RecordingStdscr(24, 80)
+    app._draw_conversation(stdscr, 3, 2, 76, 15)  # must not raise
+    assert stdscr.rows
+    for y, x, text in stdscr.rows:
+        assert 0 <= y < 24 and 0 <= x < 80
+
+
+# -- bounded string rendering contract --------------------------------------------
+
+
+@pytest.mark.parametrize("width", [1, 10, 40, 80])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "C:\\proj",
+        "C:\\" + "deep\\" * 100 + "file.py",
+        "short",
+        "",
+        "workspace with spaces and ünicode\\日本語",
+    ],
+)
+def test_path_line_never_exceeds_width(path, width):
+    from agent.tui import format_path_line
+
+    line = format_path_line(path, width)
+    assert len(line) <= width
+    if width <= 0:
+        assert line == ""
+
+
+@pytest.mark.parametrize("width", [8, 20, 40, 80])
+def test_status_and_model_footer_bounded(tmp_path, width):
+    from agent.tui import chatbox_bottom_layout, format_model_footer
+
+    model = "q" * 500
+    footer = format_model_footer(model, "high")
+    mode_str, clipped, fx = chatbox_bottom_layout(
+        "AUTO", model, "high", width, width
+    )
+    assert fx >= 0
+    assert fx >= 2 + len(mode_str)
+    assert len(clipped) <= width
+
+
+def test_long_status_message_draws_safely(tmp_path, monkeypatch):
+    import curses
+
+    monkeypatch.setattr(curses, "has_colors", lambda: False)
+    app = _app(tmp_path)
+    app.status_msg = "S" * 5000
+
+    class RecordingStdscr(FakeStdscr):
+        def __init__(self, h, w):
+            super().__init__(h, w)
+            self.rows = []
+
+        def addstr(self, y, x, text, *args):
+            assert 0 <= y < self._h
+            assert 0 <= x < self._w
+            assert x + len(text) <= self._w
+            self.rows.append((y, x, text))
+
+    stdscr = RecordingStdscr(24, 80)
+    app._draw_status(stdscr, 23, 80)  # must not raise
+    assert stdscr.rows
+    for y, x, text in stdscr.rows:
+        assert x + len(text) <= 80
+
+
+def test_long_error_summary_draws_safely(tmp_path):
+    app = _app(tmp_path)
+    app._add_system("E" * 5000)
+    rendered = app._render_message_lines(40)
+    for line, _attr in rendered:
+        assert len(line) <= 40
+
+
+# -- exact resize chains + resize during conversation ------------------------------
+
+
+def test_prompt_resize_chain_stays_valid():
+    """large→compact→extremely_small→normal→wide→compact→large."""
+    from agent.tui import calc_chatbox_geometry, get_layout_tier
+
+    chain = [
+        ((30, 100), "large"),
+        ((12, 50), "compact"),
+        ((5, 10), "extremely_small"),
+        ((24, 80), "normal"),
+        ((20, 140), "wide"),
+        ((12, 60), "compact"),
+        ((30, 120), "large"),
+    ]
+    for (h, w), tier in chain:
+        assert get_layout_tier(h, w) == tier
+        g = calc_chatbox_geometry(h, w)
+        for key in ("chat_h", "chat_w", "chat_x", "chat_y"):
+            assert g[key] >= 0
+        if not g["is_minimised"]:
+            assert g["chat_x"] + g["chat_w"] <= w
+            assert g["chat_y"] + g["chat_h"] <= h
+            assert g["inner_w"] >= 1 and g["inner_h"] >= 1
+
+
+def test_resize_during_conversation_preserves_messages(tmp_path):
+    import curses
+
+    app = _app(tmp_path)
+    app._add_message("user", "p" * 2000)
+    app._add_message("assistant", "https://example.com/" + "q" * 500)
+    before = [dict(m) for m in app.messages]
+    for h, w in [(24, 80), (12, 50), (5, 10), (30, 100), (24, 80)]:
+        stdscr = FakeStdscr(h, w)
+        app._handle_integer_key(curses.KEY_RESIZE, stdscr)  # must not raise
+        app._draw_conversation(
+            stdscr, 3, 2, max(1, w - 4), max(1, h - 8)
+        )  # must not raise
+    assert [dict(m) for m in app.messages] == before
+    assert len(app.messages) == 2
+
+
 def test_key_resize_triggers_redraw(tmp_path):
     from agent.config import AgentConfig
     from agent.tui import HAS_CURSES, TuiApp
