@@ -1990,7 +1990,10 @@ class TuiApp:
         )
 
         text = self.input_text
-        cursor = self.cursor_pos
+        # Clamp a potentially stale cursor (e.g. text shrank or the
+        # terminal resized mid-edit) so all math below stays in bounds.
+        cursor = max(0, min(self.cursor_pos, len(text)))
+        self.cursor_pos = cursor
 
         if len(text) <= available:
             visible = text
@@ -2076,14 +2079,17 @@ class TuiApp:
             except _CURSES_ERROR:
                 term_h = y + 1
             if y < term_h:
-                stdscr.move(
-                    y,
-                    min(
-                        x
-                        + cursor_x,
-                        x + width - 1,
-                    ),
-                )
+                try:
+                    stdscr.move(
+                        y,
+                        min(
+                            x
+                            + cursor_x,
+                            x + width - 1,
+                        ),
+                    )
+                except _CURSES_ERROR:
+                    pass
 
         except _CURSES_ERROR:
             pass
