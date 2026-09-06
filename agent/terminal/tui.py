@@ -73,6 +73,167 @@ def format_path_line(path: str, width: int) -> str:
     keep = max(0, width - 1)
     return ("…" + text[-keep:]) if keep else ""
 
+
+# Longest raw detail ever shown from a provider/model failure.
+_ERROR_DETAIL_CHARS = 300
+
+
+def short_error(exc: Exception, limit: int = 120) -> str:
+    """Single-line, bounded rendering of an unexpected exception."""
+    detail = " ".join(str(exc).split())
+    if len(detail) > limit:
+        detail = detail[: limit - 1] + "…"
+    return detail
+
+
+def _error_blob(status: str, summary: str, error: str) -> str:
+    return f"{status or ''} {summary or ''} {error or ''}".lower()
+
+
+def format_task_error(
+    status: str,
+    summary: str,
+    error: str,
+    provider: str,
+    model: str,
+) -> str:
+    """Render a failed run as a readable, bounded, actionable message.
+
+    Pure function (no curses, no I/O): categorises ``status`` plus the raw
+    ``summary``/``error`` text the agent loop produced, attaches the
+    provider/model context the loop itself cannot know, truncates raw
+    details, and appends a next step. Never emits tracebacks, file paths
+    from tracebacks, or secrets — callers pass only display strings.
+    """
+    provider = (provider or "ollama").strip() or "ollama"
+    model = (model or "").strip()
+    blob = _error_blob(status, summary, error)
+    detail = (error or summary or "").strip().replace("\r", "")
+    detail = " ".join(detail.split())
+    if len(detail) > _ERROR_DETAIL_CHARS:
+        detail = detail[: _ERROR_DETAIL_CHARS - 1] + "…"
+
+    head = f"Provider: {provider}"
+    if model:
+        head += f"\nModel: {model}"
+
+    lowered_status = (status or "").lower()
+    if lowered_status in ("cancelled",):
+        return "Cancelled."
+
+    if "max_iterations" in lowered_status or "iteration budget" in blob:
+        return (
+            "Model error: the iteration budget ran out before the task "
+            "finished.\n"
+            f"{head}\n\n"
+            "The request was not completed.\n"
+            "Split the task or raise AGENT_MAX_ITERATIONS and retry."
+        )
+    if any(
+        key in blob
+        for key in (
+            "cannot reach",
+            "could not connect",
+            "connection refused",
+            "connection reset",
+            "connection aborted",
+            "connectionerror",
+            "unreachable",
+            "is unavailable",
+            "offline",
+            "not running",
+            "winerror 10061",
+            "failed to establish",
+            "name or service not known",
+        )
+    ):
+        return (
+            "Model error: Ollama connection failed — the server could "
+            "not be reached.\n"
+            f"{head}\n\n"
+            "The request was not completed.\n"
+            "Start Ollama (`ollama serve`) and try again."
+        )
+    if "timed out" in blob or "timeout" in blob:
+        return (
+            "Model error: the Ollama request timed out.\n"
+            f"{head}\n\n"
+            "The request was not completed.\n"
+            "Retrying may succeed if the model is still loading."
+        )
+    if any(
+        key in blob
+        for key in (
+            "not installed",
+            "not available",
+            "model not found",
+            "no such model",
+            "not found",
+            "404",
+        )
+    ):
+        return (
+            f"Model error: model {model!r} is not available in Ollama.\n"
+            f"{head}\n\n"
+            "Install it (`ollama pull "
+            f"{model or '<model>'}`) or pick an installed one via /models."
+        )
+    if any(
+        key in blob
+        for key in (
+            "malformed",
+            "not valid json",
+            "invalid json",
+            "invalid response",
+            "empty assistant",
+            "empty response",
+            "unusable",
+        )
+    ):
+        return (
+            "Model error: the provider returned a response ASCS could "
+            "not use.\n"
+            f"{head}\n\n"
+            "The request was not completed.\n"
+            "Retry; if it persists, try /intel low or another model."
+        )
+    if any(
+        key in blob
+        for key in (
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+            "status 500",
+            "status 502",
+            "status 503",
+            "status 504",
+            "internal server error",
+            "bad gateway",
+            "service unavailable",
+            "gateway timeout",
+        )
+    ):
+        return (
+            "Model error: the Ollama server failed the request.\n"
+            f"{head}\n\n"
+            "ASCS already retried automatically.\n"
+            "Wait a moment and try again."
+        )
+    if "worker crash" in blob or "traceback" in blob:
+        return (
+            "Model error: the agent worker stopped unexpectedly.\n"
+            f"{head}\n\n"
+            f"{detail}\n"
+            "The session is still usable; retry the request."
+        )
+    if detail:
+        return f"Model error: {detail}\n{head}\n\nTry again; use /check to diagnose."
+    return (
+        f"Model error: the request did not complete.\n{head}\n\n"
+        "Try again; use /check to diagnose."
+    )
+
 # Double-press window (seconds) for destructive confirmations
 # (ESC interrupt, Ctrl+C quit). Injectably small in tests.
 CONFIRM_WINDOW_S = 2.5
@@ -931,6 +1092,20 @@ class TuiApp:
         except Exception:
             return False
 
+    def _startup_error(self, kind: str, exc: Exception) -> str:
+        """Readable startup failure with provider/model context, bounded."""
+        detail = short_error(exc, _ERROR_DETAIL_CHARS)
+        base = {
+            "config": "Configuration error",
+            "client": "Ollama client error",
+            "workspace": "Workspace error",
+            "start": "Could not start task",
+        }.get(kind, "Startup error")
+        text = f"{base}: {detail}" if detail else base
+        return (
+            f"{text}\nProvider: {self.provider}\nModel: {self.model}"
+        )
+
     def _start_task(self, text: str) -> bool:
         """Start a real AgentLoop task."""
         if self._is_busy():
@@ -942,7 +1117,7 @@ class TuiApp:
         try:
             live_cfg = self._live_config()
         except Exception as exc:
-            self._add_system(f"Config error: {exc}")
+            self._add_system(self._startup_error("config", exc))
             return False
 
         if self._hub is None:
@@ -967,7 +1142,7 @@ class TuiApp:
 
             except Exception as exc:
                 self._add_system(
-                    f"Ollama client error: {exc}"
+                    self._startup_error("client", exc)
                 )
                 return False
 
@@ -978,7 +1153,7 @@ class TuiApp:
 
         except Exception as exc:
             self._add_system(
-                f"Workspace error: {exc}"
+                self._startup_error("workspace", exc)
             )
             return False
 
@@ -1018,9 +1193,44 @@ class TuiApp:
 
         except Exception as exc:
             self._add_system(
-                f"Failed to start task: {exc}"
+                self._startup_error("start", exc)
             )
             return False
+
+    def _finish_task_result(self, result) -> None:
+        """Render a terminal runner result exactly once, truthfully.
+
+        Single authority for both _poll_runner paths: ``completed`` becomes
+        an assistant message, ``cancelled`` stays visibly cancelled, and
+        every other status (fatal, malformed, max_iterations, interrupted,
+        failed, …) becomes a readable system error via
+        :func:`format_task_error` — never a fake success.
+        """
+        summary = getattr(result, "summary", "") or ""
+        error = getattr(result, "error", "") or ""
+        status = getattr(result, "status", "") or ""
+        if status in ("completed", "COMPLETE"):
+            if summary and not any(
+                message["content"] == summary
+                for message in self.messages[-2:]
+            ):
+                self._add_message("assistant", summary)
+            self.status_msg = "Completed — ready"
+        elif status in ("cancelled", "CANCELLED"):
+            self._add_system(
+                format_task_error(
+                    status, summary, error, self.provider, self.model
+                )
+            )
+            self.status_msg = "Cancelled — ready"
+        else:
+            self._add_system(
+                format_task_error(
+                    status, summary, error, self.provider, self.model
+                )
+            )
+            self.status_msg = "Failed — ready"
+        self._runner = None
 
     def _poll_runner(self) -> None:
         """Drain backend events into the conversation."""
@@ -1039,65 +1249,7 @@ class TuiApp:
                         not self._runner.busy
                         and self._runner.result is not None
                     ):
-                        result = self._runner.result
-
-                        summary = (
-                            getattr(result, "summary", "")
-                            or getattr(result, "error", "")
-                            or ""
-                        )
-
-                        status = getattr(
-                            result,
-                            "status",
-                            "",
-                        )
-
-                        if status in (
-                            "completed",
-                            "COMPLETE",
-                        ):
-                            if summary:
-                                self._add_message(
-                                    "assistant",
-                                    summary,
-                                )
-
-                            self.status_msg = (
-                                "Completed — ready"
-                            )
-
-                        elif status in (
-                            "failed",
-                            "FAILED",
-                        ):
-                            self._add_system(
-                                f"Failed: {summary}"
-                            )
-
-                            self.status_msg = (
-                                "Failed — ready"
-                            )
-
-                        elif status in (
-                            "cancelled",
-                            "CANCELLED",
-                        ):
-                            self._add_system(
-                                "Cancelled."
-                            )
-
-                            self.status_msg = (
-                                "Cancelled — ready"
-                            )
-
-                        elif summary:
-                            self._add_message(
-                                "assistant",
-                                summary,
-                            )
-
-                        self._runner = None
+                        self._finish_task_result(self._runner.result)
 
                 except Exception:
                     pass
@@ -1242,12 +1394,14 @@ class TuiApp:
                         self._add_system(
                             f"Error: {message}"
                         )
+                        self.status_msg = "Failed — ready"
 
                 elif event_type == "task_failed":
                     if message:
                         self._add_system(
                             f"Task failed: {message}"
                         )
+                        self.status_msg = "Failed — ready"
 
                 elif event_type == "task_plan":
                     if message:
@@ -1262,73 +1416,7 @@ class TuiApp:
                     not self._runner.busy
                     and self._runner.result is not None
                 ):
-                    result = self._runner.result
-
-                    summary = (
-                        getattr(
-                            result,
-                            "summary",
-                            "",
-                        )
-                        or ""
-                    )
-
-                    error = (
-                        getattr(
-                            result,
-                            "error",
-                            "",
-                        )
-                        or ""
-                    )
-
-                    status = getattr(
-                        result,
-                        "status",
-                        "",
-                    )
-
-                    if (
-                        error
-                        and status
-                        not in (
-                            "completed",
-                            "COMPLETE",
-                        )
-                    ):
-                        self._add_system(
-                            f"{status}: {error}"
-                        )
-
-                        self.status_msg = (
-                            f"{status} — ready"
-                        )
-
-                    elif (
-                        summary
-                        and not any(
-                            message["content"]
-                            == summary
-                            for message
-                            in self.messages[-2:]
-                        )
-                    ):
-                        self._add_message(
-                            "assistant",
-                            summary,
-                        )
-
-                        self.status_msg = (
-                            "Completed — ready"
-                        )
-
-                    else:
-                        self.status_msg = (
-                            "Ready — TAB mode  |  "
-                            "/ commands"
-                        )
-
-                    self._runner = None
+                    self._finish_task_result(self._runner.result)
 
             except Exception:
                 pass
@@ -3897,7 +3985,8 @@ class TuiApp:
                     )
 
             except Exception as exc:
-                connection = f"error: {exc}"
+                detail = short_error(exc)
+                connection = f"probe failed: {detail}" if detail else "probe failed"
 
             self._add_system(
                 f"Provider: {self.provider}\n"
@@ -3966,7 +4055,7 @@ class TuiApp:
 
             except Exception as exc:
                 self._add_system(
-                    f"Experiences error: {exc}"
+                    f"Experiences error: {short_error(exc)}"
                 )
 
             return
@@ -4010,7 +4099,7 @@ class TuiApp:
 
             except Exception as exc:
                 self._add_system(
-                    f"Tasks error: {exc}"
+                    f"Tasks error: {short_error(exc)}"
                 )
 
             return
@@ -4039,7 +4128,7 @@ class TuiApp:
 
             except Exception as exc:
                 self._add_system(
-                    f"Check failed: {exc}"
+                    f"Check failed: {short_error(exc)}"
                 )
 
             return
