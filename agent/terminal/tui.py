@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -53,8 +54,12 @@ MODE_ORDER = ("PLAN", "BUILD", "AUTO")
 
 DEFAULT_STATUS_MSG = (
     "TAB mode  ·  /help commands  ·  Enter send  ·  "
-    "Ctrl+C cancel  ·  Esc quit"
+    "Ctrl+C quit  ·  Esc interrupt"
 )
+
+# Double-press window (seconds) for destructive confirmations
+# (ESC interrupt, Ctrl+C quit). Injectably small in tests.
+CONFIRM_WINDOW_S = 2.5
 
 MODE_COLORS = {
     "PLAN": "orange",
@@ -613,6 +618,10 @@ class TuiApp:
         self._pending_status = ""
         self._last_event_count = 0
 
+        # Double-press confirmation state ("quit" | "interrupt" | None).
+        self._pending_confirm: str | None = None
+        self._pending_since: float = 0.0
+
         # Slash autocomplete state.
         self._slash_selection = 0
 
@@ -630,7 +639,7 @@ class TuiApp:
         return (
             f"Mode: {modes} (now {self.mode})  ·  "
             "/help  ·  Enter send  ·  "
-            "Ctrl+C cancel  ·  Esc quit"
+            "Ctrl+C quit  ·  Esc interrupt"
         )
 
     def cycle_mode(self) -> None:
@@ -1243,6 +1252,69 @@ class TuiApp:
 
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    # Double-press confirmation (ESC interrupt, Ctrl+C quit)
+    # ------------------------------------------------------------------
+
+    def _confirm_armed(self, action: str) -> bool:
+        """True when ``action`` was armed and its window has not lapsed."""
+        if self._pending_confirm != action:
+            return False
+        return (time.monotonic() - self._pending_since) <= CONFIRM_WINDOW_S
+
+    def _arm_confirm(self, action: str, message: str) -> None:
+        self._pending_confirm = action
+        self._pending_since = time.monotonic()
+        self.status_msg = message
+
+    def _clear_confirm(self, restore_tips: bool = True) -> None:
+        """Disarm any pending confirmation, restoring the tips line."""
+        self._pending_confirm = None
+        self._pending_since = 0.0
+        if restore_tips:
+            self.status_msg = self._default_status()
+
+    def _expire_confirm(self) -> None:
+        """Drop a lapsed confirmation so a stale press can never fire."""
+        if self._pending_confirm is not None and not self._confirm_armed(
+            self._pending_confirm
+        ):
+            self._clear_confirm()
+
+    def _handle_escape(self) -> None:
+        """ESC: double-press interrupts a running response, never quits."""
+        self._expire_confirm()
+        if self._is_busy():
+            if self._confirm_armed("interrupt"):
+                self._clear_confirm(restore_tips=False)
+                self._cancel_running()
+            else:
+                self._arm_confirm(
+                    "interrupt",
+                    "Press ESC again to interrupt the response",
+                )
+        else:
+            self.status_msg = "Nothing to interrupt (ESC)"
+
+    def _handle_ctrl_c(self) -> None:
+        """Ctrl+C: cancels a running task at once; quits only on double-press."""
+        self._expire_confirm()
+        if self._is_busy():
+            self._clear_confirm(restore_tips=False)
+            self._cancel_running()
+            return
+        if self._confirm_armed("quit"):
+            self._clear_confirm()
+            self.should_quit = True
+            return
+        self.input_text = ""
+        self.cursor_pos = 0
+        self._reset_slash_selection()
+        self._arm_confirm(
+            "quit",
+            "Input cleared — press Ctrl+C again to quit",
+        )
 
     def _cancel_running(self) -> None:
         if self._runner is None:
@@ -2416,27 +2488,12 @@ class TuiApp:
             return
 
         if key == "\x1b":
-            if self._is_busy():
-                self._cancel_running()
-            else:
-                self.should_quit = True
+            self._handle_escape()
 
             return
 
         if key == "\x03":
-            if self._is_busy():
-                self._cancel_running()
-
-            else:
-                self.input_text = ""
-                self.cursor_pos = 0
-                self._reset_slash_selection()
-
-                self.status_msg = (
-                    "Input cleared — "
-                    "Ctrl+C again to quit, "
-                    "/quit to exit"
-                )
+            self._handle_ctrl_c()
 
             return
 
@@ -2504,19 +2561,12 @@ class TuiApp:
             return
 
         if key == 3:
-            if self._is_busy():
-                self._cancel_running()
+            self._handle_ctrl_c()
 
-            else:
-                self.input_text = ""
-                self.cursor_pos = 0
-                self._reset_slash_selection()
+            return
 
-                self.status_msg = (
-                    "Input cleared — "
-                    "Ctrl+C again to quit, "
-                    "/quit to exit"
-                )
+        if key == 27:
+            self._handle_escape()
 
             return
 
@@ -3419,7 +3469,7 @@ class TuiApp:
                 "/status  /clear  /history  "
                 "/experiences  /tasks  /check  /quit\n"
                 "Keys: TAB=mode  Enter=send  "
-                "Esc=quit  Ctrl+C=cancel  "
+                "Esc=interrupt  Ctrl+C=quit(x2)  "
                 "Home/End  Arrows  Backspace/Delete  "
                 "Up/Down scroll  "
                 "Slash ↑/↓=select  Tab=complete"

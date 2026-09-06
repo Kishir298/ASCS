@@ -259,6 +259,100 @@ def test_tasks_and_check(tmp_path):
     assert len(app.messages) >= 2
 
 
+# -- Double-press ESC / Ctrl+C confirmation ----------------------------------
+
+
+class _ConfirmRunner:
+    busy = True
+
+    def __init__(self):
+        self.cancel_called = False
+
+    def cancel(self):
+        self.cancel_called = True
+
+
+def _idle_app(tmp_path):
+    return TuiApp(AgentConfig(workspace=tmp_path))
+
+
+def test_esc_idle_never_quits(tmp_path):
+    app = _idle_app(tmp_path)
+    app._handle_escape()
+    assert not app.should_quit
+    assert "Nothing to interrupt" in app.status_msg
+    app._handle_escape()  # double-press while idle: still no quit
+    assert not app.should_quit
+
+
+def test_esc_busy_double_press_cancels(tmp_path):
+    app = _idle_app(tmp_path)
+    fake = _ConfirmRunner()
+    app._runner = fake
+    app._handle_escape()  # first press: confirm only
+    assert not fake.cancel_called
+    assert "again" in app.status_msg
+    app._handle_escape()  # second press: interrupt
+    assert fake.cancel_called
+
+
+def test_esc_confirm_expires(tmp_path):
+    import time
+
+    app = _idle_app(tmp_path)
+    fake = _ConfirmRunner()
+    app._runner = fake
+    app._handle_escape()
+    app._pending_since = time.monotonic() - 1000.0  # lapse the window
+    app._handle_escape()  # stale arm must re-arm, never fire
+    assert not fake.cancel_called
+    assert "again" in app.status_msg
+
+
+def test_ctrl_c_idle_double_press_quits_and_restores_tips(tmp_path):
+    from agent.tui import DEFAULT_STATUS_MSG
+
+    app = _idle_app(tmp_path)
+    app.input_text = "draft"
+    app._handle_ctrl_c()  # first press: clear input + confirm only
+    assert not app.should_quit
+    assert app.input_text == ""
+    assert "again" in app.status_msg
+    app._handle_ctrl_c()  # second press: quit, message disappears
+    assert app.should_quit
+    assert app.status_msg == DEFAULT_STATUS_MSG
+
+
+def test_ctrl_c_confirm_expires(tmp_path):
+    import time
+
+    app = _idle_app(tmp_path)
+    app._handle_ctrl_c()
+    app._pending_since = time.monotonic() - 1000.0
+    app._handle_ctrl_c()  # stale arm must re-arm, never quit
+    assert not app.should_quit
+    assert "again" in app.status_msg
+
+
+def test_ctrl_c_busy_cancels_immediately(tmp_path):
+    app = _idle_app(tmp_path)
+    fake = _ConfirmRunner()
+    app._runner = fake
+    app._handle_ctrl_c()
+    assert fake.cancel_called
+    assert not app.should_quit
+
+
+def test_integer_esc_and_ctrl_c_mirror_string_paths(tmp_path):
+    app = _idle_app(tmp_path)
+    app._handle_integer_key(27, None)  # ESC idle: hint, no quit
+    assert not app.should_quit
+    assert "Nothing to interrupt" in app.status_msg
+    app._handle_integer_key(3, None)  # Ctrl+C idle: arm, no quit
+    assert not app.should_quit
+    assert "again" in app.status_msg
+
+
 def test_quit_sets_flag(tmp_path):
     cfg = AgentConfig(workspace=tmp_path)
     app = TuiApp(cfg)
