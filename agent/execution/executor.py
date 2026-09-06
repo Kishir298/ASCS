@@ -247,6 +247,7 @@ class TaskExecutor:
         verify: Callable[["TaskExecutor", Task], VerificationResult] | None = None,
         approver: Callable[[str], bool] | None = None,
         git_baseline: set[str] | None = None,
+        intent: Any | None = None,
     ) -> None:
         self.config = config
         self.client = client
@@ -259,6 +260,10 @@ class TaskExecutor:
         self.verify = verify or self._verify_task
         self.approver = approver
         self.git_baseline = git_baseline or set()
+        # Phase 1 intent boundary, threaded from AgentLoop.run_graph so task
+        # execution enforces the same no-mutation rule as the single-shot
+        # loop. ``None`` (direct construction) means no extra restriction.
+        self.intent = intent
         self.max_verify_retries = config.max_verify_retries
         self.iterations = 0
         self._last_verify_failure: str = ""
@@ -511,6 +516,32 @@ class TaskExecutor:
                 )
         return None  # allowed
 
+    def _check_intent_allowed(self, tool: str) -> ToolResult | None:
+        """Check whether the run's intent permits this tool.
+
+        Mirrors the single-shot loop's intent gate for task execution: when
+        the objective was classified as read-only (conversation, question,
+        project inspection), mutating tools are refused. ``intent=None``
+        (direct construction, e.g. older tests) means no extra restriction.
+        """
+        intent = getattr(self, "intent", None)
+        if intent is None:
+            return None
+        try:
+            from agent.core.intent import MUTATING_TOOLS, WRITE_EXCLUDED_INTENTS
+
+            excluded = getattr(intent, "intent", None) in WRITE_EXCLUDED_INTENTS
+        except Exception:  # noqa: BLE001 - a broken intent must fail open-safe
+            return None
+        if excluded and tool in MUTATING_TOOLS:
+            return ToolResult(
+                tool,
+                f"Blocked by intent: {getattr(intent, 'intent', '?')!r} authorizes "
+                "no workspace changes.",
+                ok=False,
+            )
+        return None  # allowed
+
     def _check_git_dirty(self, tool: str, arguments: dict[str, Any]) -> ToolResult | None:
         """Block writes to files that were dirty before ASCS started (Phase 4.4).
 
@@ -668,6 +699,12 @@ class TaskExecutor:
         if blocked is not None:
             self.log(f"[task {task.id}:{iteration:02d}] {tool}: BLOCKED ({blocked.output[:100]})")
             return blocked
+        # Phase 1 intent gate: a read-only objective (conversation, question,
+        # project inspection) must never mutate, even from inside a task.
+        intent_block = self._check_intent_allowed(tool)
+        if intent_block is not None:
+            self.log(f"[task {task.id}:{iteration:02d}] {tool}: INTENT-BLOCKED ({intent_block.output[:100]})")
+            return intent_block
         # Git-dirty guard: block writes to pre-existing dirty files.
         git_block = self._check_git_dirty(tool, arguments)
         if git_block is not None:

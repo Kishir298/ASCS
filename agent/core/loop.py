@@ -83,7 +83,9 @@ from agent.planning.prompts import (
     tool_error_feedback,
 )
 from agent.core.intent import (
+    CONVERSATION as _CONVERSATION,
     MUTATING_TOOLS as _MUTATING_TOOLS,
+    QUESTION as _QUESTION,
     WRITE_EXCLUDED_INTENTS as _WRITE_EXCLUDED_INTENTS,
     Decision,
     classify_request,
@@ -679,10 +681,15 @@ class AgentLoop:
         """
         self.tracker.configure(mode=self.config.mode, task=objective)
         self._task_text = objective
-        # Phase 1 brain: the task engine is for decomposable work. A verified
-        # conversational request must never enter planning/execution.
+        # Phase 1 brain: the task engine is for decomposable work. A
+        # high-confidence conversational or general-knowledge question must
+        # never enter project refresh, planning, or execution: it is answered
+        # directly with no task graph, no workspace I/O, and no tools.
         self._decision = classify_request(objective)
-        if self._decision.is_conversational:
+        if (
+            self._decision.intent in (_CONVERSATION, _QUESTION)
+            and self._decision.confidence == "high"
+        ):
             self._conversational = True
             self._step(
                 f"Intent: {self._decision.intent} — no plan or task graph "
@@ -882,20 +889,14 @@ class AgentLoop:
             graph.validate()
         except Exception as exc:  # noqa: BLE001 - recover from a malformed plan
             # The model produced an invalid dependency graph (unknown task ref
-            # or a cycle). Fall back to a single, honest review-style task so
-            # execution still proceeds instead of hard-failing the whole run.
+            # or a cycle). Recover through the single authoritative
+            # intent-aware fallback so a question can never escalate into an
+            # implementation task on this path either.
             self._step(f"[planner] malformed task graph, falling back: {exc}")
-            graph = build_graph_from_specs(
-                [
-                    {
-                        "id": "task-1",
-                        "title": f"Implement and verify: {objective}",
-                        "description": objective,
-                        "kind": "implement",
-                        "verification": ["verify the requested changes behave as intended"],
-                    }
-                ]
-            )
+            spec = fallback_spec_for(objective)
+            spec.setdefault("id", "task-1")
+            spec.setdefault("complexity", "medium")
+            graph = build_graph_from_specs([spec])
         return {"graph": graph, "text": plan_text(graph), "count": len(graph)}
 
     def _build_executor(self, store) -> TaskExecutor:
@@ -931,6 +932,7 @@ class AgentLoop:
             run_task=wired_run,
             approver=self.approver,
             git_baseline=git_baseline,
+            intent=self._decision,
         )
 
     # -- internals ----------------------------------------------------------

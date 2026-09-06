@@ -12,11 +12,13 @@ import pytest
 from agent.core.intent import (
     AMBIGUOUS,
     CODE_CHANGE,
+    COMMAND_REQUEST,
     CONVERSATION,
     FILE_OPERATION,
     INTENT_CATEGORIES,
     PROJECT_INSPECTION,
     QUESTION,
+    VERIFICATION_REQUEST,
     WRITE_EXCLUDED_INTENTS,
     Decision,
     classify_request,
@@ -144,7 +146,6 @@ def test_inspection_requests_are_read_only(text):
         "fix the login bug",
         "add dark mode",
         "rename this function",
-        "run the tests",
         "delete the old file",
     ],
 )
@@ -160,6 +161,106 @@ def test_delete_file_with_extension_is_file_operation_intent():
     decision = classify_request("delete example.py")
     assert decision.intent in (CODE_CHANGE, FILE_OPERATION)
     assert decision.requires_write
+
+
+# ---------------------------------------------------------------------------
+# Granular intents: file_operation / command_request / verification_request
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "delete foo.py",
+        "remove foo.py",
+        "rename foo.py to bar.py",
+        "move foo.py to src/foo.py",
+        "copy foo.py to backup/foo.py",
+    ],
+)
+def test_file_operations_classify_high_confidence(text):
+    decision = classify_request(text)
+    assert decision.intent == FILE_OPERATION
+    assert decision.confidence == "high"
+    assert decision.requires_workspace
+    assert decision.requires_write
+    assert not decision.requires_command
+    assert decision.intent not in WRITE_EXCLUDED_INTENTS
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "run pytest",
+        "run the tests",
+        "execute pytest",
+        "run the test suite",
+        "check the git status",
+    ],
+)
+def test_command_requests_classify_high_confidence(text):
+    decision = classify_request(text)
+    assert decision.intent == COMMAND_REQUEST
+    assert decision.confidence == "high"
+    assert decision.requires_command
+    assert not decision.requires_write
+    assert decision.intent not in WRITE_EXCLUDED_INTENTS
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "verify the changes",
+        "check whether the implementation works",
+        "verify the fix",
+        "test the changes",
+        "confirm the changes work",
+    ],
+)
+def test_verification_requests_classify_high_confidence(text):
+    decision = classify_request(text)
+    assert decision.intent == VERIFICATION_REQUEST
+    assert decision.confidence == "high"
+    assert decision.requires_verification
+    # Verification must never authorize writes by itself.
+    assert not decision.requires_write
+    assert decision.intent not in WRITE_EXCLUDED_INTENTS
+
+
+def test_specialized_intents_win_over_generic_code_change():
+    """Precedence: delete/run/verify forms must not collapse into CODE_CHANGE."""
+    assert classify_request("delete test.py").intent == FILE_OPERATION
+    assert classify_request("run pytest").intent == COMMAND_REQUEST
+    assert classify_request("verify the changes").intent == VERIFICATION_REQUEST
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "what is Python?",
+        "what is authentication?",
+        "why do APIs use keys?",
+        "what does authentication mean?",
+    ],
+)
+def test_general_questions_stay_question_not_inspection(text):
+    decision = classify_request(text)
+    assert decision.intent == QUESTION
+    assert not decision.requires_workspace
+    assert not decision.requires_write
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "add authentication",
+        "implement a login endpoint",
+        "fix the API error",
+        "add tests for the parser",
+    ],
+)
+def test_coding_boundary_stays_code_change(text):
+    assert classify_request(text).intent == CODE_CHANGE
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +358,41 @@ def test_fallback_for_question_is_review_not_implement():
 
 
 def test_fallback_for_work_keeps_implement():
-    spec = fallback_spec_for("Do the thing")
+    spec = fallback_spec_for("create example.py containing a calculator")
     assert spec["kind"] == "implement"
     assert spec["title"].startswith("Implement and verify")
+
+
+def test_fallback_for_ambiguous_is_conservative_review():
+    """Ambiguous input must never fall back to an implementation task."""
+    spec = fallback_spec_for("Do the thing")
+    assert spec["kind"] == "review"
+    assert "Implement" not in spec["title"]
+
+
+@pytest.mark.parametrize(
+    ("objective", "kind"),
+    [
+        ("hello", "review"),
+        ("what is Python?", "review"),
+        ("Do the thing", "review"),
+        ("show me the files in this project", "inspect"),
+        ("verify the changes", "review"),
+    ],
+)
+def test_no_fallback_escalates_non_mutating_intent(objective, kind):
+    """No fallback may escalate a non-mutating intent into a mutating task."""
+    spec = fallback_spec_for(objective)
+    assert spec["kind"] == kind
+    assert "Implement and verify" not in spec["title"]
+
+
+def test_fallback_for_file_operation_is_scoped():
+    spec = fallback_spec_for("delete foo.py")
+    assert "Implement and verify" not in spec["title"]
+    assert spec["kind"] == "implement"
+
+
+def test_fallback_for_command_request_runs_command():
+    spec = fallback_spec_for("run pytest")
+    assert spec["verification"] == ["run pytest"]

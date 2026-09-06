@@ -113,6 +113,11 @@ _QUESTION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"the\sdifference)\b",
         r"^(explain|teach\sme|tell\sme\sabout)\s+(recursion|oop|git|docker|"
         r"python|javascript|rest|api)s?\b",
+        # Short definitional questions ("What is X?", "What does X mean?").
+        # Single-noun only, so multi-word project queries such as "what is
+        # in this project?" still fall through to PROJECT_INSPECTION below.
+        r"^what\s(is|are)\s(a|an|the\s)?[a-z][a-z0-9_-]*$",
+        r"^what\sdoes\s[a-z][a-z0-9_-]*\smean$",
         r"^(why|how)\s+(is|does|do|would|can)\b.*\?$",  # explicit question mark guard
         r"^(why|how)\s+(is|does|do|would|can)\b",
         r"^(what|which|when|who|where)\s.*\?$",
@@ -139,15 +144,56 @@ _PROJECT_INSPECTION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     )
 )
 
+# High-confidence file-operation work orders: explicit destructive/structural
+# actions on a NAMED path. Kept narrow (explicit extension or X-to-Y form)
+# so generic "delete the old file" stays CODE_CHANGE and terse input stays
+# ambiguous. Checked BEFORE the broad coding patterns.
+_FILE_OPERATION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\b(delete|remove)\s+(the\s)?[\w./\\-]+\.\w+\b",
+        r"\b(rename|move|copy)\s+[\w./\\-]+\.\w+\s+to\s+[\w./\\-]+",
+    )
+)
+
+# High-confidence command requests: run/execute a known suite or status
+# probe. Checked before coding so "run pytest" is not swallowed into a
+# generic code-change request.
+_COMMAND_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\b(run|execute)\s+(the\s)?(tests?|pytest|unittest|test\ssuite|suite)\b",
+        r"\bcheck\s+(the\s)?git\s+status\b",
+    )
+)
+
+# High-confidence verification requests: ask to confirm existing work
+# behaves as intended. Must NOT become a new implementation request.
+# Kept narrow (verify-family verb + work noun) so "add tests for the
+# parser" stays CODE_CHANGE.
+_VERIFICATION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bverify\b.*\b(change|changes|fix|implementation|works?|correct)\b",
+        r"\b(check|confirm)\b.*\b(change|changes|fix|implementation)\b.*\bworks?\b",
+        r"\btest\s+(the\s)?(changes|fix|implementation)\b",
+        r"\bconfirm\s+(the\s)?(changes?|fix|implementation)\b",
+    )
+)
+
 # Explicit coding/file/command work orders. These confirm work intent but the
 # model still chooses the minimal tool sequence inside mode gating.
+# NOTE: explicit-path delete and run/test-suite alternatives now live in the
+# specialized groups above (checked first); what remains here is the broad
+# coding fallback.
 _CODING_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
         r"\b(create|write|add|make|implement|build|fix|refactor|rename|move|"
         r"update|change|modify|remove|delete|extend)\b"
-        r".*\b(function|class|method|module|file|script|test|feature|bug|"
-        r"endpoint|api|component|app|calculator|todo|flag|argument|mode)\b",
+        r".*\b(function|class|method|module|file|script|tests?|parser|test|feature|bug|"
+        r"endpoint|api|component|app|calculator|todo|flag|argument|mode|"
+        r"authentication|auth|login)\b",
         r"\b(delete|remove)\s+(the\s)?(file|directory|folder)\b",
         r"\b(delete|remove)\s+(the\s)?[\w./\\-]+\.\w+\b",
         r"\b(run|execute)\s+(the\s)?(tests?|pytest|unittest|build|app|"
@@ -219,6 +265,57 @@ def classify_request(text: str) -> Decision:
                 matched_pattern=pattern.pattern,
             )
 
+    # Specialized work intents come before the broad project/question/coding
+    # patterns so "delete foo.py" / "run pytest" / "verify the changes" are
+    # not swallowed into generic code-change or ambiguous buckets.
+    for pattern in _FILE_OPERATION_PATTERNS:
+        if pattern.search(raw):
+            return Decision(
+                intent=FILE_OPERATION,
+                confidence=HIGH,
+                requires_workspace=True,
+                requires_read=True,
+                requires_write=True,
+                requires_command=False,
+                requires_planning=False,
+                requires_verification=True,
+                scope="files",
+                reason="explicit file operation on a named path; mode gating still applies",
+                matched_pattern=pattern.pattern,
+            )
+
+    for pattern in _COMMAND_PATTERNS:
+        if pattern.search(raw):
+            return Decision(
+                intent=COMMAND_REQUEST,
+                confidence=HIGH,
+                requires_workspace=True,
+                requires_read=True,
+                requires_write=False,
+                requires_command=True,
+                requires_planning=False,
+                requires_verification=True,
+                scope="commands",
+                reason="explicit command execution request; mode gating still applies",
+                matched_pattern=pattern.pattern,
+            )
+
+    for pattern in _VERIFICATION_PATTERNS:
+        if pattern.search(raw):
+            return Decision(
+                intent=VERIFICATION_REQUEST,
+                confidence=HIGH,
+                requires_workspace=True,
+                requires_read=True,
+                requires_write=False,
+                requires_command=True,
+                requires_planning=False,
+                requires_verification=True,
+                scope="project",
+                reason="verification of existing work; do not reinterpret as new implementation",
+                matched_pattern=pattern.pattern,
+            )
+
     for pattern in _PROJECT_INSPECTION_PATTERNS:
         if pattern.search(raw):
             return Decision(
@@ -285,17 +382,35 @@ def classify_request(text: str) -> Decision:
     )
 
 
+def _shell_for_command(objective: str) -> str:
+    """Best-effort shell command for a command-request fallback.
+
+    Strips the natural-language verb ("run", "execute", "check the") so the
+    executor receives something runnable. Never invents a new command: when
+    nothing sensible remains, the raw objective is returned and the executor
+    reports the outcome truthfully (bounded, no escalation).
+    """
+    text = (objective or "").strip()
+    match = re.match(r"(?i)^\s*(run|execute)\s+(the\s+)?(.+)$", text)
+    if match:
+        return match.group(3).strip() or text
+    match = re.match(r"(?i)^\s*check\s+(the\s+)?(.+)$", text)
+    if match:
+        return match.group(2).strip() or text
+    return text
+
+
 def fallback_spec_for(objective: str) -> dict:
     """Intent-aware single-task fallback for planner failure.
 
-    Planner failure must never silently convert conversation/questions/
-    ambiguous input into implementation work. Conversational and
-    question-style objectives fall back to a *review* task that reports
-    findings instead of implementing; genuine work keeps the honest
-    implement-and-verify fallback.
+    Planner failure must never silently convert non-mutating input into
+    implementation work. Only CODE_CHANGE / FILE_OPERATION / COMMAND_REQUEST
+    may yield mutating-capable tasks; everything else falls back to a
+    read-only review/inspection task. In particular NO fallback may escalate
+    a non-mutating intent into a mutating task.
     """
     intent = classify_request(objective).intent
-    if intent in (CONVERSATION, QUESTION):
+    if intent in (CONVERSATION, QUESTION, AMBIGUOUS):
         return {
             "title": f"Review request: {objective}",
             "description": (
@@ -305,6 +420,44 @@ def fallback_spec_for(objective: str) -> dict:
             "kind": "review",
             "verification": [
                 "report the outcome to the operator without modifying the workspace"
+            ],
+        }
+    if intent == PROJECT_INSPECTION:
+        return {
+            "title": f"Inspect request: {objective}",
+            "description": (
+                f"The planner could not decompose this inspection request "
+                f"({objective}). Report read-only findings; modify nothing."
+            ),
+            "kind": "inspect",
+            "verification": [
+                "report inspection findings and confirm nothing changed"
+            ],
+        }
+    if intent == FILE_OPERATION:
+        return {
+            "title": f"File operation: {objective}",
+            "description": objective,
+            "kind": "implement",
+            "verification": ["confirm the file operation completed as requested"],
+        }
+    if intent == COMMAND_REQUEST:
+        return {
+            "title": f"Run command: {objective}",
+            "description": objective,
+            "kind": "verify",
+            "verification": [f"run {_shell_for_command(objective)}"],
+        }
+    if intent == VERIFICATION_REQUEST:
+        return {
+            "title": f"Verify request: {objective}",
+            "description": (
+                f"{objective}. Re-run the relevant checks and report; "
+                "do not implement new behavior."
+            ),
+            "kind": "review",
+            "verification": [
+                "report verification findings without modifying the workspace"
             ],
         }
     return {
