@@ -24,7 +24,12 @@ verification_request → project_inspection → question → code_change →
 ambiguous. Specialized work intents are checked before the broad coding
 patterns, so `run pytest` is a command request (not a code change),
 `delete foo.py` is a file operation, and `verify the changes` is a
-verification request — never a new implementation objective. General
+verification request — never a new implementation objective. Qualifiers do
+not change the category (`run the authentication tests` is still a command
+request; `verify the authentication changes` is still verification), while
+similarly-worded work stays distinct (`fix the pytest configuration` and
+`add pytest coverage` are code changes; `what is pytest?` is a question;
+`how is pytest configured here?` is inspection). General
 questions (`What is authentication?`) stay `question`; project-anchored ones
 (`How is authentication implemented here?`) stay `project_inspection`.
 Terse-but-legitimate work orders (`do the thing`) stay `ambiguous` and

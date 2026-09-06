@@ -106,3 +106,7 @@ model's behavior was the only gate.
    `tests/core/test_run_graph_intent.py` added (12 tests: run_graph no-work
    incl. questions, planner-skip, malformed recovery per intent, executor
    gate + compat).
+6. **Boundary polish** — command requests accept one qualifier before the
+   suite noun (`run the authentication tests`); code-change nouns cover
+   config/coverage/pytest (`fix the pytest configuration`, `add pytest
+   coverage`); semantic-boundary tests pin similarly-worded requests apart.
