@@ -140,6 +140,12 @@ class FakeStdscr:
     def clear(self):
         self.cleared += 1
 
+    def keypad(self, flag):
+        pass
+
+    def timeout(self, ms):
+        pass
+
     def erase(self):
         pass
 
@@ -212,14 +218,29 @@ def test_slash_menu_tolerates_transient_getmaxyx_failure(tmp_path):
         (10, 30, "extremely_small"),
         (8, 20, "extremely_small"),
         (5, 10, "extremely_small"),
+        (5, 5, "extremely_small"),
+        (9, 9, "extremely_small"),
+        (10, 10, "extremely_small"),
+        (20, 5, "extremely_small"),
         (1, 1, "extremely_small"),
         (0, 0, "extremely_small"),
+        (39, 9, "extremely_small"),
         (12, 50, "compact"),
+        (41, 10, "extremely_small"),
+        (49, 11, "extremely_small"),
+        (69, 11, "extremely_small"),
+        (12, 70, "normal"),
         (20, 70, "normal"),
         (20, 10, "extremely_small"),
+        (12, 99, "normal"),
+        (12, 100, "large"),
         (30, 100, "large"),
+        (20, 139, "large"),
+        (20, 140, "wide"),
         (40, 140, "wide"),
         (60, 200, "wide"),
+        (200, 50, "compact"),
+        (200, 60, "compact"),
     ],
 )
 def test_layout_tier_matrix(h, w, tier):
@@ -228,10 +249,33 @@ def test_layout_tier_matrix(h, w, tier):
     assert get_layout_tier(h, w) == tier
 
 
+def test_tier_transitions_both_directions():
+    """Shrink ‑> degraded and enlarge ‑> recovery through every tier."""
+    from agent.tui import get_layout_tier
+
+    down = [(30, 100), (12, 50), (10, 40), (5, 10)]
+    assert [get_layout_tier(h, w) for h, w in down] == [
+        "large",
+        "compact",
+        "minimised",
+        "extremely_small",
+    ]
+    assert [get_layout_tier(h, w) for h, w in reversed(down)] == [
+        "extremely_small",
+        "minimised",
+        "compact",
+        "large",
+    ]
+    assert get_layout_tier(24, 80) == "normal"
+    assert get_layout_tier(5, 10) == "extremely_small"
+    assert get_layout_tier(24, 80) == "normal"  # wide swing back is safe
+
+
 @pytest.mark.parametrize(
     ("h", "w"),
-    [(10, 40), (9, 40), (8, 20), (5, 10), (1, 1), (0, 0), (12, 50),
-     (20, 10), (40, 140), (60, 200)],
+    [(10, 40), (9, 40), (8, 20), (5, 10), (5, 5), (10, 10), (20, 5),
+     (1, 1), (0, 0), (12, 50), (41, 10), (69, 11), (70, 12),
+     (20, 10), (40, 140), (60, 200), (200, 50), (200, 60)],
 )
 def test_geometry_never_invalid(h, w):
     from agent.tui import calc_chatbox_geometry
@@ -323,7 +367,7 @@ def test_draw_input_move_never_leaves_narrow_window(tmp_path):
 
 
 class ResizingStdscr(FakeStdscr):
-    """Fake terminal whose dimensions change on every read (rapid resize)."""
+    """Fake terminal whose dimensions rotate on every read (rapid resize)."""
 
     def __init__(self, sizes):
         self._sizes = list(sizes)
@@ -331,9 +375,9 @@ class ResizingStdscr(FakeStdscr):
         self.drawn = []
 
     def getmaxyx(self):
-        if len(self._sizes) > 1:
-            return self._sizes.pop(0)
-        return self._sizes[0]
+        size = self._sizes.pop(0)
+        self._sizes.append(size)
+        return size
 
 
 def test_rapid_resize_sequence_never_escapes(tmp_path):
@@ -393,6 +437,35 @@ def test_resize_back_to_large_restores_geometry(tmp_path):
     assert large["chat_w"] > 0 and large["chat_h"] > 0
 
 
+# -- startup + header transient failures -----------------------------------------
+
+
+def test_run_curses_survives_timeout_setup_failure(tmp_path, monkeypatch):
+    app = _app(tmp_path)
+
+    class TimeoutStdscr(FakeStdscr):
+        def timeout(self, ms):
+            raise _ERR("transient console state")
+
+        def get_wch(self):
+            raise KeyboardInterrupt
+
+    app.run_curses(TimeoutStdscr(24, 80))  # must not raise
+    assert app.should_quit
+
+
+def test_header_survives_transient_color_failure(tmp_path, monkeypatch):
+    import curses
+
+    monkeypatch.setattr(
+        curses, "color_pair", lambda *a: (_ for _ in ()).throw(_ERR("x"))
+    )
+    app = _app(tmp_path)
+    stdscr = FakeStdscr(24, 80)
+    app._draw_header(stdscr, 24, 80)  # must not raise
+    assert stdscr.drawn == []
+
+
 def test_key_resize_triggers_redraw(tmp_path):
     from agent.config import AgentConfig
     from agent.tui import HAS_CURSES, TuiApp
@@ -424,9 +497,11 @@ class ModalStdscr(FakeStdscr):
 
 
 class ModalWin:
-    def __init__(self, h=100, w=100):
+    def __init__(self, h=100, w=100, fail_box=False, fail_refresh=False):
         self._h = h
         self._w = w
+        self.fail_box = fail_box
+        self.fail_refresh = fail_refresh
 
     def getmaxyx(self):
         return (self._h, self._w)
@@ -435,13 +510,19 @@ class ModalWin:
         pass
 
     def box(self):
-        pass
+        if self.fail_box:
+            raise _ERR("transient box failure")
 
     def addstr(self, y, x, text, *args):
         pass
 
+    def refresh(self):
+        if self.fail_refresh:
+            raise _ERR("transient refresh failure")
+
     def noutrefresh(self):
-        pass
+        if self.fail_refresh:
+            raise _ERR("transient refresh failure")
 
 
 def _patch_modal_curses(monkeypatch, sizes):
@@ -469,6 +550,20 @@ class FailingSizeModal(ModalStdscr):
         raise _ERR("transient console state")
 
 
+class FlakyGetchModal(ModalStdscr):
+    """First keypress raises transiently, then the script runs."""
+
+    def __init__(self, h, w, keys):
+        super().__init__(h, w, keys)
+        self._flaked = False
+
+    def getch(self):
+        if not self._flaked:
+            self._flaked = True
+            raise _ERR("transient resize race")
+        return super().getch()
+
+
 def test_picker_tolerates_transient_getmaxyx_failure(tmp_path):
     app = _app(tmp_path)
     stdscr = FailingSizeModal(24, 80, keys=[27])
@@ -479,6 +574,89 @@ def test_intel_picker_tolerates_transient_getmaxyx_failure(tmp_path):
     app = _app(tmp_path)
     stdscr = FailingSizeModal(24, 80, keys=[27])
     assert app._run_intel_picker(stdscr) is None
+
+
+def test_picker_survives_transient_getch_failure(tmp_path, monkeypatch):
+    sizes = []
+    _patch_modal_curses(monkeypatch, sizes)
+    app = _app(tmp_path)
+    stdscr = FlakyGetchModal(24, 80, keys=[10])  # raise once, then Enter
+    result = app._run_picker(stdscr, {"ollama": ["m"]})
+    assert result is not None  # popup survived instead of aborting
+    assert sizes  # and actually drew
+
+
+def test_intel_picker_survives_transient_getch_failure(tmp_path, monkeypatch):
+    sizes = []
+    _patch_modal_curses(monkeypatch, sizes)
+    app = _app(tmp_path)
+    stdscr = FlakyGetchModal(24, 80, keys=[10])
+    assert app._run_intel_picker(stdscr) in (
+        "default",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+    )
+
+
+def test_picker_survives_box_failure(tmp_path, monkeypatch):
+    import curses
+
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    monkeypatch.setattr(curses, "has_colors", lambda: False)
+    monkeypatch.setattr(
+        curses, "newwin", lambda h, w, y, x: ModalWin(fail_box=True)
+    )
+    app = _app(tmp_path)
+    stdscr = ModalStdscr(24, 80, keys=[27])
+    assert app._run_picker(stdscr, {"ollama": ["m"]}) is None
+
+
+def test_picker_survives_refresh_failure(tmp_path, monkeypatch):
+    import curses
+
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    monkeypatch.setattr(curses, "has_colors", lambda: False)
+    monkeypatch.setattr(
+        curses, "newwin", lambda h, w, y, x: ModalWin(fail_refresh=True)
+    )
+    app = _app(tmp_path)
+    stdscr = ModalStdscr(24, 80, keys=[10])
+    # transient refresh failure is contained; the popup keeps working
+    assert app._run_picker(stdscr, {"ollama": ["m"]}) is not None
+
+
+def test_picker_survives_transient_newwin_failure(tmp_path, monkeypatch):
+    import curses
+
+    calls = []
+
+    def flaky_newwin(h, w, y, x):
+        calls.append((h, w, y, x))
+        if len(calls) == 1:
+            raise _ERR("transient resize race")
+        return ModalWin()
+
+    monkeypatch.setattr(curses, "newwin", flaky_newwin)
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    monkeypatch.setattr(curses, "has_colors", lambda: False)
+    app = _app(tmp_path)
+    stdscr = ModalStdscr(24, 80, keys=[27])
+    assert app._run_picker(stdscr, {"ollama": ["m"]}) is None
+    assert len(calls) >= 1
+
+
+def test_draw_input_survives_move_failure(tmp_path):
+    app = _app(tmp_path)
+    app.input_text = "hello"
+    app.cursor_pos = 2
+
+    class MoveFailStdscr(CursorStdscr):
+        def move(self, y, x):
+            raise _ERR("transient move failure")
+
+    app._draw_input(MoveFailStdscr(24, 80), 20, 2, 76)  # must not raise
 
 
 def _app(tmp_path):
