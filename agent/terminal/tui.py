@@ -1730,16 +1730,16 @@ class TuiApp:
         if h < 1 or w < 1:
             return
 
-        pair = (
-            curses.color_pair(1)
-            if curses.has_colors()
-            else 0
-        )
-
         title = "A.S.C.S."
         subtitle = "A Smart Coding System"
 
         try:
+            pair = (
+                curses.color_pair(1)
+                if curses.has_colors()
+                else 0
+            )
+
             safe_addstr(
                 stdscr,
                 0,
@@ -2933,6 +2933,10 @@ class TuiApp:
                 # Transient console state: wait for the next keypress.
                 try:
                     key = stdscr.getch()
+                except _CURSES_ERROR:
+                    # Transient resize race: retry the keypress instead of
+                    # abandoning the popup.
+                    continue
                 except Exception:
                     return None
                 if key == 27:
@@ -2952,6 +2956,10 @@ class TuiApp:
                 # keypress (a resize rebuilds everything on retry).
                 try:
                     key = stdscr.getch()
+                except _CURSES_ERROR:
+                    # Transient resize race: retry the keypress instead of
+                    # abandoning the popup.
+                    continue
                 except Exception:
                     return None
                 if key == 27:
@@ -3098,6 +3106,10 @@ class TuiApp:
 
             try:
                 key = stdscr.getch()
+            except _CURSES_ERROR:
+                # Transient resize race: retry the keypress instead of
+                # abandoning the popup.
+                continue
             except Exception:
                 return None
 
@@ -3184,6 +3196,10 @@ class TuiApp:
                 # Transient console state: wait for the next keypress.
                 try:
                     key = stdscr.getch()
+                except _CURSES_ERROR:
+                    # Transient resize race: retry the keypress instead of
+                    # abandoning the popup.
+                    continue
                 except Exception:
                     return None
                 if key == 27:
@@ -3202,6 +3218,10 @@ class TuiApp:
             if clamped is None:
                 try:
                     key = stdscr.getch()
+                except _CURSES_ERROR:
+                    # Transient resize race: retry the keypress instead of
+                    # abandoning the popup.
+                    continue
                 except Exception:
                     return None
                 if key == 27:
@@ -3304,6 +3324,10 @@ class TuiApp:
 
             try:
                 key = stdscr.getch()
+            except _CURSES_ERROR:
+                # Transient resize race: retry the keypress instead of
+                # abandoning the popup.
+                continue
             except Exception:
                 return None
 
@@ -3445,6 +3469,10 @@ class TuiApp:
                 # Transient console state: wait for the next keypress.
                 try:
                     key = stdscr.getch()
+                except _CURSES_ERROR:
+                    # Transient resize race: retry the keypress instead of
+                    # abandoning the dialog.
+                    continue
                 except Exception:
                     return
                 if key == 27:
@@ -3464,6 +3492,10 @@ class TuiApp:
                 # keypress (a resize rebuilds everything on retry).
                 try:
                     key = stdscr.getch()
+                except _CURSES_ERROR:
+                    # Transient resize race: retry the keypress instead of
+                    # abandoning the dialog.
+                    continue
                 except Exception:
                     return
                 if key == 27:
@@ -3589,6 +3621,10 @@ class TuiApp:
 
             try:
                 key = stdscr.getch()
+            except _CURSES_ERROR:
+                # Transient resize race: retry the keypress instead of
+                # abandoning the dialog.
+                continue
             except Exception:
                 return
 
@@ -4157,7 +4193,12 @@ class TuiApp:
             # Keypad mode is a nicety (arrow/function keys); the loop still
             # works with raw codes when the backend rejects it transiently.
             pass
-        stdscr.timeout(100)
+        try:
+            stdscr.timeout(100)
+        except _CURSES_ERROR:
+            # Blocking-input setup is best-effort for the same reason:
+            # get_wch() still works, only the 100 ms poll timing degrades.
+            pass
 
         try:
             curses.cbreak()
