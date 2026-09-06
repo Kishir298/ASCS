@@ -1712,7 +1712,7 @@ class TuiApp:
                     curses.A_DIM | pair,
                 )
 
-        except curses.error:
+        except _CURSES_ERROR:
             pass
 
     def _draw_pathline(
@@ -1730,13 +1730,14 @@ class TuiApp:
                 max(0, width - 4),
             )
             if line:
-                stdscr.addstr(
+                safe_addstr(
+                    stdscr,
                     y,
                     2,
                     line,
                     curses.A_DIM,
                 )
-        except curses.error:
+        except _CURSES_ERROR:
             pass
 
     def _render_message_lines(
@@ -1872,13 +1873,14 @@ class TuiApp:
                 break
 
             try:
-                stdscr.addstr(
+                safe_addstr(
+                    stdscr,
                     y + idx,
                     x,
-                    line[:width],
+                    line,
                     attr,
                 )
-            except curses.error:
+            except _CURSES_ERROR:
                 pass
 
     def _draw_input(
@@ -1947,14 +1949,16 @@ class TuiApp:
                 else 0
             )
 
-            stdscr.addstr(
+            safe_addstr(
+                stdscr,
                 y,
                 x,
                 prompt,
                 curses.A_BOLD | pair,
             )
 
-            stdscr.addstr(
+            safe_addstr(
+                stdscr,
                 y,
                 x + len(prompt),
                 visible,
@@ -1969,7 +1973,8 @@ class TuiApp:
             )
 
             if remaining:
-                stdscr.addstr(
+                safe_addstr(
+                    stdscr,
                     y,
                     x
                     + len(prompt)
@@ -1978,16 +1983,21 @@ class TuiApp:
                     pair,
                 )
 
-            stdscr.move(
-                y,
-                min(
-                    x
-                    + cursor_x,
-                    x + width - 1,
-                ),
-            )
+            try:
+                term_h, _ = stdscr.getmaxyx()
+            except _CURSES_ERROR:
+                term_h = y + 1
+            if y < term_h:
+                stdscr.move(
+                    y,
+                    min(
+                        x
+                        + cursor_x,
+                        x + width - 1,
+                    ),
+                )
 
-        except curses.error:
+        except _CURSES_ERROR:
             pass
 
     def _draw_slash_menu(
@@ -2008,7 +2018,11 @@ class TuiApp:
 
         self._clamp_slash_selection()
 
-        h, w = stdscr.getmaxyx()
+        try:
+            h, w = stdscr.getmaxyx()
+        except _CURSES_ERROR:
+            # Transient console state: skip the menu this frame.
+            return 0
 
         available_width = max(
             20,
@@ -2059,10 +2073,11 @@ class TuiApp:
                 )
             )
 
-            stdscr.addstr(
+            safe_addstr(
+                stdscr,
                 menu_y,
                 x,
-                header[:available_width],
+                header,
                 curses.A_DIM,
             )
 
@@ -2118,15 +2133,17 @@ class TuiApp:
                         available_width
                     )
 
-                    stdscr.addstr(
+                    safe_addstr(
+                        stdscr,
                         y,
                         x,
-                        padded[:available_width],
+                        padded,
                         attr,
                     )
 
                 else:
-                    stdscr.addstr(
+                    safe_addstr(
+                        stdscr,
                         y,
                         x,
                         line,
@@ -2141,14 +2158,15 @@ class TuiApp:
                     "↑/↓ select  ·  Tab complete  ·  Enter run"
                 )
 
-                stdscr.addstr(
+                safe_addstr(
+                    stdscr,
                     hint_y,
                     x,
-                    hint[:available_width],
+                    hint,
                     curses.A_DIM,
                 )
 
-        except curses.error:
+        except _CURSES_ERROR:
             return 0
 
         return menu_height + 1
@@ -2183,7 +2201,7 @@ class TuiApp:
                 curses.A_DIM | pair,
             )
 
-        except curses.error:
+        except _CURSES_ERROR:
             pass
 
     def _draw(self, stdscr) -> None:
@@ -2197,7 +2215,11 @@ class TuiApp:
             # Transient console state between resizes: the next frame retries.
             return
 
-        h, w = stdscr.getmaxyx()
+        try:
+            h, w = stdscr.getmaxyx()
+        except _CURSES_ERROR:
+            # Transient console state between resizes: the next frame retries.
+            return
 
         if h <= 0 or w <= 0:
             return
@@ -2262,7 +2284,7 @@ class TuiApp:
 
                 stdscr.refresh()
 
-            except curses.error:
+            except _CURSES_ERROR:
                 pass
 
             return
@@ -2312,7 +2334,7 @@ class TuiApp:
 
                 stdscr.refresh()
 
-            except curses.error:
+            except _CURSES_ERROR:
                 pass
 
             return
@@ -2330,13 +2352,14 @@ class TuiApp:
         # Header separator.
         try:
             if w > 2:
-                stdscr.addstr(
+                safe_addstr(
+                    stdscr,
                     1,
                     2,
                     "─" * max(0, w - 4),
                     curses.A_DIM,
                 )
-        except curses.error:
+        except _CURSES_ERROR:
             pass
 
         # Workspace path line (row 2, above the conversation).
@@ -2397,13 +2420,14 @@ class TuiApp:
         # Input separator.
         try:
             if w > 2:
-                stdscr.addstr(
+                safe_addstr(
+                    stdscr,
                     input_separator_y,
                     2,
                     "─" * max(0, w - 4),
                     curses.A_DIM,
                 )
-        except curses.error:
+        except _CURSES_ERROR:
             pass
 
         # Slash autocomplete lives above the input line.
@@ -2809,7 +2833,17 @@ class TuiApp:
         )
 
         while True:
-            h, w = stdscr.getmaxyx()
+            try:
+                h, w = stdscr.getmaxyx()
+            except _CURSES_ERROR:
+                # Transient console state: wait for the next keypress.
+                try:
+                    key = stdscr.getch()
+                except Exception:
+                    return None
+                if key == 27:
+                    return None
+                continue
 
             clamped = clamp_window(
                 h,
@@ -2848,7 +2882,8 @@ class TuiApp:
 
                 win.box()
 
-                win.addstr(
+                safe_addstr(
+                    win,
                     0,
                     max(
                         1,
@@ -2935,7 +2970,8 @@ class TuiApp:
                             else curses.A_REVERSE
                         )
 
-                        win.addstr(
+                        safe_addstr(
+                            win,
                             y,
                             1,
                             text,
@@ -2943,14 +2979,16 @@ class TuiApp:
                         )
 
                     else:
-                        win.addstr(
+                        safe_addstr(
+                            win,
                             y,
                             1,
                             text,
                             attr,
                         )
 
-                win.addstr(
+                safe_addstr(
+                    win,
                     picker_h - 1,
                     2,
                     "↑/↓ move · Enter select · Esc cancel"
@@ -2961,7 +2999,7 @@ class TuiApp:
                 win.noutrefresh()
                 curses.doupdate()
 
-            except curses.error:
+            except _CURSES_ERROR:
                 pass
 
             try:
@@ -3046,7 +3084,17 @@ class TuiApp:
         )
 
         while True:
-            h, w = stdscr.getmaxyx()
+            try:
+                h, w = stdscr.getmaxyx()
+            except _CURSES_ERROR:
+                # Transient console state: wait for the next keypress.
+                try:
+                    key = stdscr.getch()
+                except Exception:
+                    return None
+                if key == 27:
+                    return None
+                continue
 
             # Recomputed every frame so a resize never leaves stale geometry.
             clamped = clamp_window(
@@ -3084,7 +3132,8 @@ class TuiApp:
 
                 win.box()
 
-                win.addstr(
+                safe_addstr(
+                    win,
                     0,
                     max(
                         1,
@@ -3136,14 +3185,16 @@ class TuiApp:
                     else:
                         attr = 0
 
-                    win.addstr(
+                    safe_addstr(
+                        win,
                         y,
                         1,
                         text,
                         attr,
                     )
 
-                win.addstr(
+                safe_addstr(
+                    win,
                     picker_h - 1,
                     2,
                     "↑/↓ move · Enter select · Esc cancel"
@@ -3154,7 +3205,7 @@ class TuiApp:
                 win.noutrefresh()
                 curses.doupdate()
 
-            except curses.error:
+            except _CURSES_ERROR:
                 pass
 
             try:
@@ -3236,23 +3287,7 @@ class TuiApp:
 
         provider, _ = result
 
-        h, w = stdscr.getmaxyx()
-
         dialog_h = 9
-        dialog_w = min(
-            64,
-            max(20, w - 4),
-        )
-
-        dialog_y = max(
-            0,
-            (h - dialog_h) // 2,
-        )
-
-        dialog_x = max(
-            0,
-            (w - dialog_w) // 2,
-        )
 
         base_url = DEFAULT_BASE_URLS.get(
             provider,
@@ -3310,7 +3345,17 @@ class TuiApp:
         error_message: str | None = None
 
         while True:
-            h, w = stdscr.getmaxyx()
+            try:
+                h, w = stdscr.getmaxyx()
+            except _CURSES_ERROR:
+                # Transient console state: wait for the next keypress.
+                try:
+                    key = stdscr.getch()
+                except Exception:
+                    return
+                if key == 27:
+                    return
+                continue
 
             clamped = clamp_window(
                 h,
@@ -3353,7 +3398,8 @@ class TuiApp:
                     f" Connect · {provider} "
                 )
 
-                win.addstr(
+                safe_addstr(
+                    win,
                     0,
                     max(
                         1,
@@ -3372,7 +3418,8 @@ class TuiApp:
 
                     input_y = label_y + 1
 
-                    win.addstr(
+                    safe_addstr(
+                        win,
                         label_y,
                         2,
                         labels[index][
@@ -3409,7 +3456,8 @@ class TuiApp:
                     else:
                         attr = 0
 
-                    win.addstr(
+                    safe_addstr(
+                        win,
                         input_y,
                         2,
                         display,
@@ -3417,7 +3465,8 @@ class TuiApp:
                     )
 
                 if error_message:
-                    win.addstr(
+                    safe_addstr(
+                        win,
                         dialog_h - 3,
                         2,
                         error_message[
@@ -3429,7 +3478,8 @@ class TuiApp:
                         curses.A_BOLD,
                     )
 
-                win.addstr(
+                safe_addstr(
+                    win,
                     dialog_h - 2,
                     2,
                     "Enter confirm · Tab next · Esc cancel"
@@ -3440,7 +3490,7 @@ class TuiApp:
                 win.noutrefresh()
                 curses.doupdate()
 
-            except curses.error:
+            except _CURSES_ERROR:
                 pass
 
             try:
@@ -4006,7 +4056,12 @@ class TuiApp:
     def run_curses(self, stdscr) -> None:
         self._init_colors(stdscr)
 
-        stdscr.keypad(True)
+        try:
+            stdscr.keypad(True)
+        except _CURSES_ERROR:
+            # Keypad mode is a nicety (arrow/function keys); the loop still
+            # works with raw codes when the backend rejects it transiently.
+            pass
         stdscr.timeout(100)
 
         try:
@@ -4049,7 +4104,7 @@ class TuiApp:
                         stdscr,
                     )
 
-            except curses.error:
+            except _CURSES_ERROR:
                 continue
 
             except KeyboardInterrupt:
