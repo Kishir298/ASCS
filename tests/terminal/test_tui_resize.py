@@ -213,6 +213,8 @@ def test_slash_menu_tolerates_transient_getmaxyx_failure(tmp_path):
     ("h", "w", "tier"),
     [
         (10, 40, "minimised"),
+        (10, 20, "extremely_small"),
+        (12, 40, "minimised"),
         (10, 39, "extremely_small"),
         (9, 40, "extremely_small"),
         (10, 30, "extremely_small"),
@@ -226,6 +228,10 @@ def test_slash_menu_tolerates_transient_getmaxyx_failure(tmp_path):
         (0, 0, "extremely_small"),
         (39, 9, "extremely_small"),
         (12, 50, "compact"),
+        (20, 40, "minimised"),
+        (20, 60, "compact"),
+        (20, 80, "normal"),
+        (24, 80, "normal"),
         (41, 10, "extremely_small"),
         (49, 11, "extremely_small"),
         (69, 11, "extremely_small"),
@@ -238,6 +244,7 @@ def test_slash_menu_tolerates_transient_getmaxyx_failure(tmp_path):
         (20, 139, "large"),
         (20, 140, "wide"),
         (40, 140, "wide"),
+        (50, 200, "wide"),
         (60, 200, "wide"),
         (200, 50, "compact"),
         (200, 60, "compact"),
@@ -273,9 +280,9 @@ def test_tier_transitions_both_directions():
 
 @pytest.mark.parametrize(
     ("h", "w"),
-    [(10, 40), (9, 40), (8, 20), (5, 10), (5, 5), (10, 10), (20, 5),
-     (1, 1), (0, 0), (12, 50), (41, 10), (69, 11), (70, 12),
-     (20, 10), (40, 140), (60, 200), (200, 50), (200, 60)],
+    [(10, 40), (10, 20), (12, 40), (9, 40), (8, 20), (5, 10), (5, 5), (10, 10), (20, 5),
+     (1, 1), (0, 0), (12, 50), (41, 10), (69, 11), (70, 12), (20, 40), (20, 60),
+     (20, 80), (24, 80), (20, 10), (40, 140), (60, 200), (200, 50), (200, 60), (50, 200)],
 )
 def test_geometry_never_invalid(h, w):
     from agent.tui import calc_chatbox_geometry
@@ -651,6 +658,48 @@ def test_resize_during_conversation_preserves_messages(tmp_path):
         )  # must not raise
     assert [dict(m) for m in app.messages] == before
     assert len(app.messages) == 2
+
+
+def test_rapid_resize_full_matrix_sequence(tmp_path):
+    """All ten required sizes in one rapid sequence: nothing escapes."""
+    import curses
+
+    from agent.tui import calc_chatbox_geometry, get_layout_tier
+
+    app = _app(tmp_path)
+    app.input_text = "draft"
+    app.cursor_pos = 3
+    app._add_message("user", "hello")
+    sizes = [
+        (24, 80),
+        (20, 60),
+        (12, 50),
+        (5, 10),
+        (30, 100),
+        (10, 40),
+        (40, 140),
+        (20, 80),
+        (12, 60),
+        (30, 120),
+    ]
+    stdscr = ResizingStdscr(sizes)
+    seen_tiers = set()
+    for _ in sizes:
+        app._handle_integer_key(curses.KEY_RESIZE, stdscr)  # must not raise
+        h, w = stdscr.getmaxyx()
+        tier = get_layout_tier(h, w)
+        seen_tiers.add(tier)
+        g = calc_chatbox_geometry(h, w)
+        for key in ("chat_h", "chat_w", "chat_x", "chat_y"):
+            assert g[key] >= 0
+        if not g["is_minimised"]:
+            assert g["chat_x"] + g["chat_w"] <= w
+            assert g["chat_y"] + g["chat_h"] <= h
+    assert app.input_text == "draft"
+    assert app.cursor_pos == 3
+    assert len(app.messages) == 1
+    assert not app.should_quit
+    assert len(seen_tiers) >= 3
 
 
 def test_key_resize_triggers_redraw(tmp_path):
