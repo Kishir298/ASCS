@@ -77,6 +77,62 @@ def format_path_line(path: str, width: int) -> str:
 # (ESC interrupt, Ctrl+C quit). Injectably small in tests.
 CONFIRM_WINDOW_S = 2.5
 
+def safe_addstr(win, y: int, x: int, text: str, attr: int = 0) -> bool:
+    """Draw ``text`` clipped to ``win``; never fail on terminal bounds.
+
+    Rejects negative coordinates, verifies ``y`` against the live window
+    height, truncates to the remaining width (steering clear of the
+    bottom-right final cell, which some backends reject), and converts an
+    expected ``curses.error`` into ``False``. Returns True when drawn (or
+    when there is nothing to draw). Only genuine programming errors
+    (bad types, missing methods) propagate.
+    """
+    if win is None or y < 0 or x < 0:
+        return False
+    if not text:
+        return True
+    if not isinstance(text, str):
+        raise TypeError(f"safe_addstr text must be str, got {type(text).__name__}")
+    try:
+        height, width = win.getmaxyx()
+    except _CURSES_ERROR:
+        return False
+    if y >= height:
+        return False
+    room = width - x
+    if room <= 1:
+        return False
+    try:
+        win.addstr(y, x, text[: room - 1], attr)
+    except _CURSES_ERROR:
+        return False
+    return True
+
+
+def clamp_window(
+    term_h: int,
+    term_w: int,
+    want_h: int,
+    want_w: int,
+    min_h: int = 3,
+    min_w: int = 10,
+) -> tuple[int, int, int, int] | None:
+    """Fit a centered child window into the current terminal size.
+
+    Returns ``(y, x, height, width)`` clamped to the terminal, or None when
+    even the minimum usable window does not fit (caller should skip the
+    popup and retry on the next frame). Pure function, no curses.
+    """
+    if term_h <= 0 or term_w <= 0:
+        return None
+    height = min(max(1, want_h), term_h)
+    width = min(max(1, want_w), term_w)
+    if height < min_h or width < min_w:
+        return None
+    y = max(0, (term_h - height) // 2)
+    x = max(0, (term_w - width) // 2)
+    return (y, x, height, width)
+
 MODE_COLORS = {
     "PLAN": "orange",
     "BUILD": "blue",
@@ -103,6 +159,14 @@ try:
 except Exception:  # pragma: no cover
     curses = None  # type: ignore[assignment]
     HAS_CURSES = False
+
+
+# Expected-failure class for terminal I/O. On platforms without any curses
+# backend this degrades to Exception; helpers below still never propagate
+# genuine programming errors because they only wrap getmaxyx/addstr calls.
+_CURSES_ERROR = (
+    curses.error if HAS_CURSES and isinstance(curses.error, type) else Exception
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1332,6 +1396,27 @@ class TuiApp:
             "Input cleared — press Ctrl+C again to quit",
         )
 
+    def _handle_resize(self, stdscr) -> None:
+        """Redraw cleanly after a terminal resize.
+
+        curses already updates its internal dimensions on KEY_RESIZE; every
+        frame re-reads ``getmaxyx()`` and rebuilds geometry, so the only
+        work needed here is clearing stale screen contents and forcing one
+        immediate full redraw (the main loop redraws anyway). Only an
+        expected ``curses.error`` from a transient console state is
+        tolerated; anything else propagates.
+        """
+        if stdscr is None:
+            return
+        try:
+            stdscr.clear()
+        except _CURSES_ERROR:
+            return
+        try:
+            self._draw(stdscr)
+        except _CURSES_ERROR:
+            pass
+
     def _cancel_running(self) -> None:
         if self._runner is None:
             self.status_msg = "Nothing to cancel."
@@ -1567,7 +1652,8 @@ class TuiApp:
         subtitle = "A Smart Coding System"
 
         try:
-            stdscr.addstr(
+            safe_addstr(
+                stdscr,
                 0,
                 2,
                 title,
@@ -1575,7 +1661,8 @@ class TuiApp:
             )
 
             if w > 30:
-                stdscr.addstr(
+                safe_addstr(
+                    stdscr,
                     0,
                     12,
                     subtitle,
@@ -1595,7 +1682,8 @@ class TuiApp:
                 (w - len(mode_text)) // 2,
             )
 
-            stdscr.addstr(
+            safe_addstr(
+                stdscr,
                 0,
                 mode_x,
                 mode_text,
@@ -1613,7 +1701,8 @@ class TuiApp:
             )
 
             if len(footer) < w - 22:
-                stdscr.addstr(
+                safe_addstr(
+                    stdscr,
                     0,
                     max(
                         2,
@@ -2086,10 +2175,11 @@ class TuiApp:
                 else 0
             )
 
-            stdscr.addstr(
+            safe_addstr(
+                stdscr,
                 y,
                 2,
-                status[: max(0, width - 4)],
+                status,
                 curses.A_DIM | pair,
             )
 
@@ -2101,7 +2191,11 @@ class TuiApp:
         if not HAS_CURSES or curses is None:
             return
 
-        stdscr.erase()
+        try:
+            stdscr.erase()
+        except _CURSES_ERROR:
+            # Transient console state between resizes: the next frame retries.
+            return
 
         h, w = stdscr.getmaxyx()
 
@@ -2117,7 +2211,7 @@ class TuiApp:
 
                 stdscr.erase()
 
-        except Exception:
+        except _CURSES_ERROR:
             pass
 
         geometry = calc_chatbox_geometry(
@@ -2142,7 +2236,8 @@ class TuiApp:
                     f"{MIN_TERM_W}x{MIN_TERM_H}"
                 )
 
-                stdscr.addstr(
+                safe_addstr(
+                    stdscr,
                     max(0, h // 2 - 1),
                     max(
                         0,
@@ -2153,7 +2248,8 @@ class TuiApp:
                     curses.A_BOLD,
                 )
 
-                stdscr.addstr(
+                safe_addstr(
+                    stdscr,
                     max(0, h // 2),
                     max(
                         0,
@@ -2189,7 +2285,8 @@ class TuiApp:
                     else "Terminal too small"
                 )
 
-                stdscr.addstr(
+                safe_addstr(
+                    stdscr,
                     max(1, h // 2),
                     max(
                         0,
@@ -2335,10 +2432,11 @@ class TuiApp:
         try:
             stdscr.noutrefresh()
             curses.doupdate()
-        except Exception:
+        except _CURSES_ERROR:
             try:
                 stdscr.refresh()
-            except Exception:
+            except _CURSES_ERROR:
+                # Transient resize state: the next frame redraws anyway.
                 pass
 
     # ------------------------------------------------------------------
@@ -2595,6 +2693,7 @@ class TuiApp:
             HAS_CURSES
             and key == curses.KEY_RESIZE
         ):
+            self._handle_resize(stdscr)
             return
 
         if key in (
@@ -2712,25 +2811,26 @@ class TuiApp:
         while True:
             h, w = stdscr.getmaxyx()
 
-            picker_h = min(
-                len(items) + 4,
-                max(5, h - 4),
+            clamped = clamp_window(
+                h,
+                w,
+                min(len(items) + 4, max(5, h - 4)),
+                min(64, max(30, w - 4)),
+                min_h=5,
+                min_w=20,
             )
+            if clamped is None:
+                # Terminal too small for any picker: wait for the next
+                # keypress (a resize rebuilds everything on retry).
+                try:
+                    key = stdscr.getch()
+                except Exception:
+                    return None
+                if key == 27:
+                    return None
+                continue
 
-            picker_w = min(
-                64,
-                max(30, w - 4),
-            )
-
-            picker_y = max(
-                0,
-                (h - picker_h) // 2,
-            )
-
-            picker_x = max(
-                0,
-                (w - picker_w) // 2,
-            )
+            picker_y, picker_x, picker_h, picker_w = clamped
 
             try:
                 win = curses.newwin(
@@ -2928,23 +3028,8 @@ class TuiApp:
         if not HAS_CURSES or curses is None:
             return None
 
-        h, w = stdscr.getmaxyx()
-
-        picker_h = len(
-            INTEL_DISPLAY_ORDER
-        ) + 4
-
-        picker_w = 42
-
-        picker_h = min(
-            picker_h,
-            max(5, h - 4),
-        )
-
-        picker_w = min(
-            picker_w,
-            max(24, w - 4),
-        )
+        want_h = len(INTEL_DISPLAY_ORDER) + 4
+        want_w = 42
 
         selected = 0
 
@@ -2963,15 +3048,25 @@ class TuiApp:
         while True:
             h, w = stdscr.getmaxyx()
 
-            picker_y = max(
-                0,
-                (h - picker_h) // 2,
+            # Recomputed every frame so a resize never leaves stale geometry.
+            clamped = clamp_window(
+                h,
+                w,
+                min(want_h, max(5, h - 4)),
+                min(want_w, max(24, w - 4)),
+                min_h=5,
+                min_w=20,
             )
+            if clamped is None:
+                try:
+                    key = stdscr.getch()
+                except Exception:
+                    return None
+                if key == 27:
+                    return None
+                continue
 
-            picker_x = max(
-                0,
-                (w - picker_w) // 2,
-            )
+            picker_y, picker_x, picker_h, picker_w = clamped
 
             try:
                 win = curses.newwin(
@@ -3217,20 +3312,26 @@ class TuiApp:
         while True:
             h, w = stdscr.getmaxyx()
 
-            dialog_w = min(
-                64,
-                max(20, w - 4),
+            clamped = clamp_window(
+                h,
+                w,
+                dialog_h,
+                min(64, max(20, w - 4)),
+                min_h=dialog_h,
+                min_w=20,
             )
+            if clamped is None:
+                # Terminal too small for the dialog: wait for the next
+                # keypress (a resize rebuilds everything on retry).
+                try:
+                    key = stdscr.getch()
+                except Exception:
+                    return
+                if key == 27:
+                    return
+                continue
 
-            dialog_x = max(
-                0,
-                (w - dialog_w) // 2,
-            )
-
-            dialog_y = max(
-                0,
-                (h - dialog_h) // 2,
-            )
+            dialog_y, dialog_x, dialog_h, dialog_w = clamped
 
             try:
                 win = curses.newwin(
