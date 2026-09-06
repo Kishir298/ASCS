@@ -388,6 +388,9 @@ def test_draw_pathline_skips_narrow_terminals(tmp_path):
         def __init__(self):
             self.calls = []
 
+        def getmaxyx(self):
+            return (24, 80)
+
         def addstr(self, y, x, text, *a):
             self.calls.append((y, x, text))
 

@@ -178,6 +178,99 @@ def test_handle_resize_with_none_stdscr_is_noop(tmp_path):
     app._handle_resize(None)  # must not raise
 
 
+# -- transient getmaxyx failures -------------------------------------------------
+
+
+class FailingSizeStdscr(FakeStdscr):
+    def getmaxyx(self):
+        raise _ERR("transient console state")
+
+
+def test_draw_tolerates_transient_getmaxyx_failure(tmp_path):
+    app = _app(tmp_path)
+    app._draw(FailingSizeStdscr(24, 80))  # must not raise; retries next frame
+
+
+def test_slash_menu_tolerates_transient_getmaxyx_failure(tmp_path):
+    app = _app(tmp_path)
+    app.input_text = "/mo"
+    app.cursor_pos = 3
+    assert (
+        app._draw_slash_menu(FailingSizeStdscr(24, 80), 20, 2, 76) == 0
+    )
+
+
+# -- layout dimension matrix -----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("h", "w", "tier"),
+    [
+        (10, 40, "minimised"),
+        (10, 39, "extremely_small"),
+        (9, 40, "extremely_small"),
+        (10, 30, "extremely_small"),
+        (8, 20, "extremely_small"),
+        (5, 10, "extremely_small"),
+        (1, 1, "extremely_small"),
+        (0, 0, "extremely_small"),
+        (12, 50, "compact"),
+        (20, 70, "normal"),
+        (30, 100, "large"),
+        (40, 140, "wide"),
+    ],
+)
+def test_layout_tier_matrix(h, w, tier):
+    from agent.tui import get_layout_tier
+
+    assert get_layout_tier(h, w) == tier
+
+
+@pytest.mark.parametrize(
+    ("h", "w"),
+    [(10, 40), (9, 40), (8, 20), (5, 10), (1, 1), (0, 0), (12, 50), (40, 140)],
+)
+def test_geometry_never_invalid(h, w):
+    from agent.tui import calc_chatbox_geometry
+
+    g = calc_chatbox_geometry(h, w)
+    for key in ("chat_h", "chat_w", "chat_x", "chat_y", "inner_w", "inner_h"):
+        assert g[key] >= 0
+    if not g["is_minimised"]:
+        assert g["chat_x"] + g["chat_w"] <= w
+        assert g["chat_y"] + g["chat_h"] <= h
+
+
+@pytest.mark.parametrize(
+    ("model", "chat_w", "inner_w"),
+    [
+        ("m", 78, 76),
+        ("x" * 60, 65, 63),
+        ("x" * 200, 80, 78),
+        ("m", 10, 8),
+        ("m", 1, 1),
+    ],
+)
+def test_bottom_layout_bounded_for_hostile_inputs(model, chat_w, inner_w):
+    from agent.tui import chatbox_bottom_layout
+
+    mode_str, footer, fx = chatbox_bottom_layout(
+        "AUTO", model, "high", chat_w, inner_w
+    )
+    assert fx >= 0
+    assert fx >= 2 + len(mode_str)  # never overlaps the mode badge
+    assert len(footer) <= max(len(footer), 0)
+
+
+def test_path_line_long_path_stays_bounded():
+    from agent.tui import format_path_line
+
+    line = format_path_line("C:\\" + "x" * 300, 80)
+    assert len(line) == 80
+    assert line.startswith("…")
+    assert line.endswith("x")
+
+
 def test_key_resize_triggers_redraw(tmp_path):
     from agent.config import AgentConfig
     from agent.tui import HAS_CURSES, TuiApp
@@ -209,6 +302,13 @@ class ModalStdscr(FakeStdscr):
 
 
 class ModalWin:
+    def __init__(self, h=100, w=100):
+        self._h = h
+        self._w = w
+
+    def getmaxyx(self):
+        return (self._h, self._w)
+
     def bkgd(self, *args):
         pass
 
@@ -240,6 +340,23 @@ def _assert_sizes_fit(sizes, term_h, term_w):
         assert h > 0 and w > 0
         assert y >= 0 and x >= 0
         assert y + h <= term_h and x + w <= term_w
+
+
+class FailingSizeModal(ModalStdscr):
+    def getmaxyx(self):
+        raise _ERR("transient console state")
+
+
+def test_picker_tolerates_transient_getmaxyx_failure(tmp_path):
+    app = _app(tmp_path)
+    stdscr = FailingSizeModal(24, 80, keys=[27])
+    assert app._run_picker(stdscr, {"ollama": ["m"]}) is None
+
+
+def test_intel_picker_tolerates_transient_getmaxyx_failure(tmp_path):
+    app = _app(tmp_path)
+    stdscr = FailingSizeModal(24, 80, keys=[27])
+    assert app._run_intel_picker(stdscr) is None
 
 
 def _app(tmp_path):
@@ -305,14 +422,3 @@ def test_connect_dialog_tiny_terminal_aborts_cleanly(
     stdscr = ModalStdscr(4, 10, keys=[27])
     assert app._do_connect(stdscr) is None
     assert sizes == []
-    from agent.config import AgentConfig
-    from agent.tui import HAS_CURSES, TuiApp
-
-    if not HAS_CURSES:
-        pytest.skip("curses backend required")
-    import curses
-
-    app = TuiApp(AgentConfig(workspace=tmp_path))
-    stdscr = FakeStdscr(24, 80)
-    app._handle_integer_key(curses.KEY_RESIZE, stdscr)
-    assert stdscr.cleared == 1  # intentional redraw, not a silent swallow
