@@ -216,8 +216,10 @@ def test_slash_menu_tolerates_transient_getmaxyx_failure(tmp_path):
         (0, 0, "extremely_small"),
         (12, 50, "compact"),
         (20, 70, "normal"),
+        (20, 10, "extremely_small"),
         (30, 100, "large"),
         (40, 140, "wide"),
+        (60, 200, "wide"),
     ],
 )
 def test_layout_tier_matrix(h, w, tier):
@@ -228,7 +230,8 @@ def test_layout_tier_matrix(h, w, tier):
 
 @pytest.mark.parametrize(
     ("h", "w"),
-    [(10, 40), (9, 40), (8, 20), (5, 10), (1, 1), (0, 0), (12, 50), (40, 140)],
+    [(10, 40), (9, 40), (8, 20), (5, 10), (1, 1), (0, 0), (12, 50),
+     (20, 10), (40, 140), (60, 200)],
 )
 def test_geometry_never_invalid(h, w):
     from agent.tui import calc_chatbox_geometry
@@ -269,6 +272,125 @@ def test_path_line_long_path_stays_bounded():
     assert len(line) == 80
     assert line.startswith("…")
     assert line.endswith("x")
+
+
+# -- input cursor bounds ---------------------------------------------------------
+
+
+class CursorStdscr(FakeStdscr):
+    def __init__(self, h=24, w=80):
+        super().__init__(h, w)
+        self.moves = []
+
+    def move(self, y, x):
+        h, w = self.getmaxyx()
+        assert 0 <= y < h, f"move y={y} outside 0..{h - 1}"
+        assert 0 <= x < w, f"move x={x} outside 0..{w - 1}"
+        self.moves.append((y, x))
+
+
+@pytest.mark.parametrize("width", [80, 20, 10, 5, 2, 1])
+def test_draw_input_clamps_stale_cursor(tmp_path, width):
+    app = _app(tmp_path)
+    app.input_text = "hello"
+    app.cursor_pos = 500  # stale: far beyond the text
+    stdscr = CursorStdscr(24, 80)
+    app._draw_input(stdscr, 20, 2, width)  # must not raise
+    assert app.cursor_pos == len("hello")
+    for y, x in stdscr.moves:
+        assert 0 <= x < 80
+
+
+def test_draw_input_negative_cursor_recovers(tmp_path):
+    app = _app(tmp_path)
+    app.input_text = "hello"
+    app.cursor_pos = -7
+    app._draw_input(CursorStdscr(24, 80), 20, 2, 76)
+    assert app.cursor_pos == 0
+
+
+def test_draw_input_move_never_leaves_narrow_window(tmp_path):
+    app = _app(tmp_path)
+    app.input_text = "x" * 100
+    app.cursor_pos = 100
+    stdscr = CursorStdscr(10, 10)
+    app._draw_input(stdscr, 5, 2, 6)  # must not raise
+    for y, x in stdscr.moves:
+        assert 0 <= y < 10 and 0 <= x < 10
+
+
+# -- rapid resize + resize during active work ------------------------------------
+
+
+class ResizingStdscr(FakeStdscr):
+    """Fake terminal whose dimensions change on every read (rapid resize)."""
+
+    def __init__(self, sizes):
+        self._sizes = list(sizes)
+        self.cleared = 0
+        self.drawn = []
+
+    def getmaxyx(self):
+        if len(self._sizes) > 1:
+            return self._sizes.pop(0)
+        return self._sizes[0]
+
+
+def test_rapid_resize_sequence_never_escapes(tmp_path):
+    import curses
+
+    from agent.tui import get_layout_tier
+
+    app = _app(tmp_path)
+    app.input_text = "draft task"
+    app.cursor_pos = 5
+    sizes = [(24, 80), (10, 30), (5, 10), (30, 100), (1, 1), (24, 80)]
+    stdscr = ResizingStdscr(sizes)
+    seen_tiers = set()
+    for _ in range(6):
+        app._handle_integer_key(curses.KEY_RESIZE, stdscr)  # must not raise
+        seen_tiers.add(get_layout_tier(*stdscr.getmaxyx()))
+    # app state intact, layout actually tracked the changing sizes
+    assert app.input_text == "draft task"
+    assert app.cursor_pos == 5
+    assert not app.should_quit
+    assert len(seen_tiers) >= 2
+
+
+def test_resize_during_task_preserves_work(tmp_path):
+    import curses
+
+    app = _app(tmp_path)
+
+    class BusyRunner:
+        busy = True
+        result = None
+
+    class QuietHub:
+        def history(self):
+            return []
+
+    app._runner = BusyRunner()
+    app._hub = QuietHub()
+    stdscr = ResizingStdscr([(24, 80), (12, 40), (24, 80)])
+    for _ in range(3):
+        app._handle_integer_key(curses.KEY_RESIZE, stdscr)
+        app._poll_runner()  # must not cancel, fail, or complete anything
+    assert app._runner is not None
+    assert app._runner.busy is True
+    assert "Cancelled" not in app.status_msg
+    assert "Failed" not in app.status_msg
+    assert "Completed" not in app.status_msg
+
+
+def test_resize_back_to_large_restores_geometry(tmp_path):
+    from agent.tui import calc_chatbox_geometry
+
+    small = calc_chatbox_geometry(5, 10)
+    assert small["is_minimised"] == 1
+    large = calc_chatbox_geometry(24, 80)
+    assert large["is_minimised"] == 0
+    assert large["chat_w"] > 0 and large["chat_h"] > 0
 
 
 def test_key_resize_triggers_redraw(tmp_path):
