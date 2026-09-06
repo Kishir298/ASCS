@@ -106,7 +106,11 @@ def main(argv: list[str] | None = None) -> int:
 
     print(ASCII_BANNER, flush=True)
 
-    return _cmd_tui(config, client)
+    rc = _cmd_tui(config, client)
+    from agent.models.proc import maybe_stop_ollama_on_exit
+
+    maybe_stop_ollama_on_exit(config)
+    return rc
 
 
 if __name__ == "__main__":

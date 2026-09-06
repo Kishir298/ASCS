@@ -49,6 +49,13 @@ def _print_error(msg: str) -> None:
     print(f"ERROR: {msg}", file=sys.stderr, flush=True)
 
 
+def _stop_ollama(config) -> None:
+    """Best-effort Ollama shutdown when a CLI session ends (never raises)."""
+    from .models.proc import maybe_stop_ollama_on_exit
+
+    maybe_stop_ollama_on_exit(config, log=_print_step)
+
+
 def _boot_progress(phase: str, message: str, elapsed: float) -> None:
     """Live-print each finished startup stage with its real timing."""
     stamp = f"[{elapsed:6.2f}s]" if elapsed > 0 else "[     ]"
@@ -340,10 +347,12 @@ def main(argv: list[str] | None = None) -> int:
             result = run_agent(config, client, task, log=_print_step)
     except KeyboardInterrupt:
         _print_step("\nCancelled.")
+        _stop_ollama(config)
         return 130
     except OllamaError as exc:
         _print_step("\nSTATUS: FAILED")
         _print_error(str(exc))
+        _stop_ollama(config)
         return 1
 
     print(f"\nSTATUS: {result.status.upper()}")
@@ -363,7 +372,9 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(result, "error", ""):
         _print_error(result.error)
 
-    return 0 if result.is_complete else 1
+    rc = 0 if result.is_complete else 1
+    _stop_ollama(config)
+    return rc
 
 
 def _cmd_ui(config, client) -> int:
@@ -396,6 +407,7 @@ def _cmd_ui(config, client) -> int:
         serve(config, client, workspace, block=True)
     except KeyboardInterrupt:
         pass
+    _stop_ollama(config)
     return 0
 
 
