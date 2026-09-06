@@ -353,6 +353,53 @@ def test_integer_esc_and_ctrl_c_mirror_string_paths(tmp_path):
     assert "again" in app.status_msg
 
 
+# -- Workspace path line -------------------------------------------------------
+
+
+def test_format_path_line_shows_full_path_when_it_fits():
+    from agent.tui import format_path_line
+
+    line = format_path_line(r"C:\Users\rishi\Desktop\RISARMS\ASCS", 80)
+    assert line == r"Workspace: C:\Users\rishi\Desktop\RISARMS\ASCS"
+
+
+def test_format_path_line_truncates_head_keeps_tail():
+    from agent.tui import format_path_line
+
+    line = format_path_line(r"C:\Users\rishi\Desktop\RISARMS\ASCS", 20)
+    assert len(line) == 20
+    assert line.startswith("…")
+    assert line.endswith("ASCS")
+
+
+def test_format_path_line_edge_cases():
+    from agent.tui import format_path_line
+
+    assert format_path_line("C:\\ws", 0) == ""
+    assert format_path_line("C:\\ws", -5) == ""
+    assert format_path_line("", 80) == "Workspace: "
+
+
+def test_draw_pathline_skips_narrow_terminals(tmp_path):
+    cfg = AgentConfig(workspace=r"C:\proj")
+    app = TuiApp(cfg)
+
+    class Dummy:
+        def __init__(self):
+            self.calls = []
+
+        def addstr(self, y, x, text, *a):
+            self.calls.append((y, x, text))
+
+    dummy = Dummy()
+    app._draw_pathline(dummy, 2, 5)  # too narrow: nothing drawn
+    assert dummy.calls == []
+    app._draw_pathline(dummy, 2, 80)
+    assert len(dummy.calls) == 1
+    assert dummy.calls[0][0] == 2
+    assert r"C:\proj" in dummy.calls[0][2]
+
+
 def test_quit_sets_flag(tmp_path):
     cfg = AgentConfig(workspace=tmp_path)
     app = TuiApp(cfg)

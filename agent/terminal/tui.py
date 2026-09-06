@@ -57,6 +57,22 @@ DEFAULT_STATUS_MSG = (
     "Ctrl+C quit  ·  Esc interrupt"
 )
 
+
+def format_path_line(path: str, width: int) -> str:
+    """Render the workspace path for the header path line.
+
+    The full path is shown when it fits; otherwise the head is truncated
+    with a leading ellipsis so the most informative tail stays visible.
+    Pure function (no curses) so it is deterministically testable.
+    """
+    text = f"Workspace: {path or ''}"
+    if width <= 0:
+        return ""
+    if len(text) <= width:
+        return text
+    keep = max(0, width - 1)
+    return ("…" + text[-keep:]) if keep else ""
+
 # Double-press window (seconds) for destructive confirmations
 # (ESC interrupt, Ctrl+C quit). Injectably small in tests.
 CONFIRM_WINDOW_S = 2.5
@@ -1610,6 +1626,30 @@ class TuiApp:
         except curses.error:
             pass
 
+    def _draw_pathline(
+        self,
+        stdscr,
+        y: int,
+        width: int,
+    ) -> None:
+        """Draw the full workspace path on the header path line."""
+        if y < 0 or width <= 10:
+            return
+        try:
+            line = format_path_line(
+                str(self.config.workspace),
+                max(0, width - 4),
+            )
+            if line:
+                stdscr.addstr(
+                    y,
+                    2,
+                    line,
+                    curses.A_DIM,
+                )
+        except curses.error:
+            pass
+
     def _render_message_lines(
         self,
         width: int,
@@ -2201,6 +2241,13 @@ class TuiApp:
                 )
         except curses.error:
             pass
+
+        # Workspace path line (row 2, above the conversation).
+        self._draw_pathline(
+            stdscr,
+            2,
+            w,
+        )
 
         # Reserve the bottom area for input, status and autocomplete.
         autocomplete_active = bool(
