@@ -139,6 +139,7 @@ def _cyclic_plan():
         ("what is Python?", "Review request"),
         ("show me the files in this project", "Inspect request"),
         ("verify the changes", "Verify request"),
+        ("run pytest", "Run command"),
     ],
 )
 def test_malformed_graph_fallback_never_implements_non_mutating(

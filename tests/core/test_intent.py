@@ -196,6 +196,8 @@ def test_file_operations_classify_high_confidence(text):
         "execute pytest",
         "run the test suite",
         "check the git status",
+        "check git status",
+        "run the authentication tests",
     ],
 )
 def test_command_requests_classify_high_confidence(text):
@@ -257,10 +259,30 @@ def test_general_questions_stay_question_not_inspection(text):
         "implement a login endpoint",
         "fix the API error",
         "add tests for the parser",
+        "add authentication to the API",
+        "fix the pytest configuration",
+        "add pytest coverage",
     ],
 )
 def test_coding_boundary_stays_code_change(text):
     assert classify_request(text).intent == CODE_CHANGE
+
+
+@pytest.mark.parametrize(
+    ("text", "want"),
+    [
+        ("delete authentication.py", FILE_OPERATION),
+        ("run the authentication tests", COMMAND_REQUEST),
+        ("verify the authentication changes", VERIFICATION_REQUEST),
+        ("what is pytest?", QUESTION),
+        ("how is pytest configured here?", PROJECT_INSPECTION),
+        ("verify pytest changes", VERIFICATION_REQUEST),
+        ("fix this", AMBIGUOUS),
+    ],
+)
+def test_semantic_boundaries_stay_distinct(text, want):
+    """Similarly-worded requests across intents must not collapse together."""
+    assert classify_request(text).intent == want
 
 
 # ---------------------------------------------------------------------------

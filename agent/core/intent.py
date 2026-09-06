@@ -162,7 +162,7 @@ _FILE_OPERATION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
 _COMMAND_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
-        r"\b(run|execute)\s+(the\s)?(tests?|pytest|unittest|test\ssuite|suite)\b",
+        r"\b(run|execute)\s+(the\s)?([\w-]+\s+)?(tests?|pytest|unittest|test\ssuite|suite)\b",
         r"\bcheck\s+(the\s)?git\s+status\b",
     )
 )
@@ -193,7 +193,8 @@ _CODING_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"update|change|modify|remove|delete|extend)\b"
         r".*\b(function|class|method|module|file|script|tests?|parser|test|feature|bug|"
         r"endpoint|api|component|app|calculator|todo|flag|argument|mode|"
-        r"authentication|auth|login)\b",
+        r"authentication|auth|login|config|configuration|setup|settings|"
+        r"coverage|pytest)\b",
         r"\b(delete|remove)\s+(the\s)?(file|directory|folder)\b",
         r"\b(delete|remove)\s+(the\s)?[\w./\\-]+\.\w+\b",
         r"\b(run|execute)\s+(the\s)?(tests?|pytest|unittest|build|app|"
