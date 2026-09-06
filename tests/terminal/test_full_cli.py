@@ -612,12 +612,21 @@ def test_slash_help_includes_required():
 
 
 def test_hello_fits_all_tiers():
+    """Chatbox fills the terminal without ever exceeding it.
+
+    NOTE: the old HELLO_TEXT floor assertion was retired. HELLO_TEXT is no
+    longer rendered (see test_no_hello_in_empty_render) and 63 columns
+    cannot render on a narrower terminal, so compact widths honestly clip
+    to the terminal instead of overflowing (which would crash/clip curses).
+    """
     for w, h in [(80, 24), (120, 40), (60, 20), (90, 30)]:
         g = calc_chatbox_geometry(h, w)
         if g["is_minimised"] == 0:
-            assert g["inner_w"] >= HELLO_LEN, f"failed for {w}x{h}"
-            # chatbox uses most width
-            assert g["chat_w"] >= HELLO_LEN + 2
+            assert g["chat_w"] <= w, f"overflow for {w}x{h}"
+            assert g["chat_w"] >= min(w, HELLO_LEN + 2), f"failed for {w}x{h}"
+            # inner width is the chatbox minus its border
+            assert g["inner_w"] == g["chat_w"] - 2
+            assert g["inner_w"] >= 1
 
 
 def test_status_bar_spacing():

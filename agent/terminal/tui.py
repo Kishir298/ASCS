@@ -598,7 +598,7 @@ class TuiApp:
         self.history: list[str] = []
 
         self.status_msg = (
-            "TAB mode  ·  / commands  ·  Enter send  ·  "
+            "TAB mode  ·  /help commands  ·  Enter send  ·  "
             "Ctrl+C cancel  ·  Esc quit"
         )
 
@@ -3387,6 +3387,7 @@ class TuiApp:
         )
 
         if not command:
+            self._add_system(slash_menu_text())
             self.status_msg = (
                 "Type / to see available commands"
             )
@@ -3426,6 +3427,8 @@ class TuiApp:
                     pass
 
             self._scroll_offset = 0
+
+            self._add_system("Cleared")
 
             self.status_msg = "Cleared"
 

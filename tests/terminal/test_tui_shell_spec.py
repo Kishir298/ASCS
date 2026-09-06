@@ -95,12 +95,21 @@ def test_comfortable_tier_is_normal():
 
 
 def test_compact_widths_keep_63_col_floor():
+    """Compact tiers fill the terminal without overflowing it.
+
+    NOTE: the old 63-column floor was retired. 63 columns cannot render on
+    a narrower terminal, so compact widths honestly use the full terminal
+    width instead of overflowing (which would crash/clip curses). Wide
+    compact terminals (>= 63 cols) still honour the MIN_CHATBOX_W floor.
+    """
     for w in (50, 55, 60, 63, 65, 69):
         g = calc_chatbox_geometry(24, w)
         assert g["tier"] == "compact"
         assert g["is_minimised"] == 0
-        assert g["chat_w"] >= MIN_CHATBOX_W  # 63: never shrunk below minimum
-        assert g["inner_w"] >= HELLO_LEN
+        assert g["chat_w"] == w  # full width, capped to the terminal
+        assert g["inner_w"] == w - 2  # minus the border
+    # the floor still holds wherever the terminal allows it
+    assert calc_chatbox_geometry(24, 69)["chat_w"] >= MIN_CHATBOX_W
 
 
 # -- bottom-line layout ----------------------------------------------------------
@@ -134,9 +143,13 @@ def test_bottom_layout_compact_truncates_long_footer():
 
 def test_slash_menu_lists_all_three_commands():
     text = slash_menu_text()
+    for name, _description in SLASH_COMMANDS:
+        assert name in text
+    # The command surface intentionally grew past the original three
+    # (/models /connect /intel); the menu must list the full contract.
+    assert len(SLASH_COMMANDS) == 11
     for name in ("/models", "/connect", "/intel"):
         assert name in text
-    assert len(SLASH_COMMANDS) == 3
 
 
 def test_bare_slash_shows_menu(tmp_path):
