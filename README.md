@@ -73,7 +73,7 @@ venv to run `risa`.
 > activating the environment, as long as `.venv` has been created and
 > `requirements.txt` installed.
 
-The default model is `qwen3-coder:30b` (fallback `qwen2.5-coder:14b` for 16 GB via `--model`/`OLLAMA_MODEL`). Override per run with `--model`, or set any model via environment variables (see Configuration).
+The default model is `qwen3-coder:30b` (fallback `qwen2.5-coder:14b` for 16 GB via `--model`/`OLLAMA_MODEL`). If the primary model is not installed but the fallback is, the agent switches to it once and retries. Override per run with `--model`, or set any model via environment variables (see Configuration). Closing the CLI stops the Ollama server (`AGENT_STOP_OLLAMA_ON_EXIT=false` opts out; diagnostics never stop it).
 
 ## Quick start
 
@@ -311,6 +311,8 @@ Environment variables (CLI flags win, both override defaults):
 | `AGENT_UI_HOST` / `AGENT_UI_PORT` | web UI bind address / port | `127.0.0.1` / `8787` |
 | `OLLAMA_BASE_URL`        | Ollama server URL                    | `http://localhost:11434` |
 | `OLLAMA_MODEL`           | Ollama model                         | `qwen3-coder:30b` (fallback `qwen2.5-coder:14b`) |
+| `OLLAMA_FALLBACK_MODEL`  | auto-switch target when primary missing (one retry) | `qwen2.5-coder:14b` |
+| `AGENT_STOP_OLLAMA_ON_EXIT` | stop the Ollama server when the CLI closes (diagnostics excluded) | `true` |
 | `AGENT_MAX_ITERATIONS`   | agent iteration budget (→ `TIMEOUT`) | `50`                  |
 | `AGENT_REQUEST_TIMEOUT`  | per-model-call timeout (s)           | `600`                 |
 | `AGENT_COMMAND_TIMEOUT`  | default `run_command` timeout (s)    | `120`                 |
