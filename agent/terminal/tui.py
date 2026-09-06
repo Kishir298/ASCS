@@ -51,6 +51,11 @@ MIN_TERM_H = 10
 
 MODE_ORDER = ("PLAN", "BUILD", "AUTO")
 
+DEFAULT_STATUS_MSG = (
+    "TAB mode  ·  /help commands  ·  Enter send  ·  "
+    "Ctrl+C cancel  ·  Esc quit"
+)
+
 MODE_COLORS = {
     "PLAN": "orange",
     "BUILD": "blue",
@@ -597,10 +602,7 @@ class TuiApp:
         self.messages: list[dict[str, str]] = []
         self.history: list[str] = []
 
-        self.status_msg = (
-            "TAB mode  ·  /help commands  ·  Enter send  ·  "
-            "Ctrl+C cancel  ·  Esc quit"
-        )
+        self.status_msg = DEFAULT_STATUS_MSG
 
         self.should_quit = False
 
@@ -618,6 +620,19 @@ class TuiApp:
     # State
     # ------------------------------------------------------------------
 
+    def _default_status(self) -> str:
+        """The persistent tips line shown when nothing transient applies."""
+        return DEFAULT_STATUS_MSG
+
+    def _mode_status(self) -> str:
+        """Status line after a TAB mode switch: all modes plus the tips."""
+        modes = " → ".join(MODE_ORDER)
+        return (
+            f"Mode: {modes} (now {self.mode})  ·  "
+            "/help  ·  Enter send  ·  "
+            "Ctrl+C cancel  ·  Esc quit"
+        )
+
     def cycle_mode(self) -> None:
         self.mode = next_mode(self.mode)
 
@@ -626,7 +641,7 @@ class TuiApp:
         except Exception:
             pass
 
-        self.status_msg = f"Mode → {self.mode}"
+        self.status_msg = self._mode_status()
 
     def set_intelligence(self, level: str) -> str:
         lvl = validate_intel(level)

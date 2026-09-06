@@ -65,6 +65,22 @@ def test_next_mode_helper():
     assert next_mode("unknown") == "PLAN"
 
 
+def test_tab_cycle_keeps_tips_and_lists_modes(tmp_path):
+    """TAB must show every mode without dropping the bottom-bar tips."""
+    from agent.tui import DEFAULT_STATUS_MSG
+
+    cfg = AgentConfig(workspace=tmp_path, mode="PLAN")
+    app = TuiApp(cfg)
+    assert app.status_msg == DEFAULT_STATUS_MSG
+    for expected in ("BUILD", "AUTO", "PLAN"):
+        app.cycle_mode()
+        assert app.mode == expected
+        for mode in ("PLAN", "BUILD", "AUTO"):
+            assert mode in app.status_msg
+        for tip in ("/help", "Enter send", "Ctrl+C", "Esc"):
+            assert tip in app.status_msg
+
+
 def test_intelligence_levels_all_work(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
