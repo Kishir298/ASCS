@@ -9,8 +9,21 @@ build/
 
 # Personal / local secrets and tool state
 .env
+.env.*
+!.env.example
 .opencode/
 node_modules/
+
+# TLS / device material (never commit even if dropped here by tooling)
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+.risarms-device.json
+*-device.json
+device.json
 
 # E2E scratch workspace, if ever created inside the repo
 .tmp_workspace/
@@ -23,5 +36,13 @@ node_modules/
 ascs_demo_hello.txt
 Ollama_tests/
 
-# macOS
+# macOS / Windows / IDE
 .DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Coverage / logs
+.coverage
+htmlcov/
+*.log
