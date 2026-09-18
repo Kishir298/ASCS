@@ -14,7 +14,7 @@ dependencies are the standard library plus `windows-curses` on Windows.
   (`agent/context/index.py`, dual limits). No global chunk size.
 - Runtime is Windows-only (`risa --tui`, Ollama); dev testing (`pytest`) is
   cross-platform via the `python → python3` fallback in
-  `agent/tools/core.py`.
+  `agent/tools/core.py:507` (_python_fallback_command).
 - Terminal-native: `risa` defaults to the curses TUI. `--ui` is a compat alias
   for `--tui`. Browser serving (`agent/web.py` HTTP/SSE + deleted
   `agent/ui/index.html`) is legacy; `EventHub`/`TaskRunner` in `web.py` remain

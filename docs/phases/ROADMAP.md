@@ -2,7 +2,7 @@
 
 Source of truth for sequencing: `phases/phase-*/OBJECTIVES.md` (details) and
 `ACCEPTANCE.md` (sign-off). Status words: `Done` (Phase 0 on sign-off),
-`Planned` (all others — objectives exist, work not started).
+`Planned` (remaining — objectives exist, work not started; Phase 1 Done, see per-phase NOTES).
 
 ```text
 Phase 0 — Architecture & Repository Organization ............ Done

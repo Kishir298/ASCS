@@ -6,7 +6,7 @@ keeps humans in control through three session modes, a live web UI, and
 real STOP/cancellation.
 
 - **Zero runtime dependencies** — standard library only, driven by your local
-  Ollama server. No code ever leaves your machine.
+  Ollama server by default. Ollama-local mode sends no code off-machine; optional OpenAI-compatible providers (OpenAI/Anthropic/Grok/Google/DeepSeek via config, LiteLLM/OpenCode) are explicit opt-in and do leave the machine.
 - **Explicit lifecycle** — every run moves through
   `RECEIVING_TASK → PLANNING → EXECUTING → VERIFYING → COMPLETE`
   (or `FAILED` / `CANCELLED` / `TIMEOUT`), visible live in the UI.
@@ -31,7 +31,7 @@ real STOP/cancellation.
 > **Platform note:** The full runtime (`risa --ui` / `--tui`, Ollama) is
 > **Windows-only** (32 GB recommended target). **Dev testing (`pytest`) is
 > cross-platform:** on macOS/Linux `python` transparently falls back to
-> `python3` at execution time (`agent/tools/core.py:508`), so `pytest` passes
+> `python3` at execution time (`agent/tools/core.py:507`), so `pytest` passes
 > inside or outside a venv. Use `.venv/bin/python -m pytest -q` on any OS for
 > the canonical run.
 
@@ -109,7 +109,7 @@ stage's timing and any recovery hint on failure.
 | `PLAN`  | Read-only: lists, reads, searches, `inspect_environment`, git, `set_plan`. No writes, no commands. |
 | `BUILD` | Records an approved plan first, then implements and tests it.    |
 | `AUTO`  | Fully autonomous end-to-end run.                                 |
-| `SAFE`  | Legacy overlay: every modifying action asks for approval (y/N).  |
+| `SAFE` *(overlay, not a mode)* | Gating overlay: every modifying action asks for approval (y/N). |
 
 `--safe` and `--auto` conflict; PLAN/BUILD/AUTO are set with `--mode`.
 
@@ -121,6 +121,8 @@ risa --ui [--host 127.0.0.1] [--port 8787]
 
 The default `--host 127.0.0.1` binds to localhost only; use `0.0.0.0` if you
 want other machines on your LAN to reach it.
+
+> **UI note:** the terminal TUI (`risa --tui`) is primary; `risa --ui` browser serving is legacy/aliased — see `docs/architecture/RUNTIME.md`.
 
 - Chat area with live state pill and per-step output
 - Mode selector (PLAN / BUILD / AUTO) per task
@@ -270,7 +272,7 @@ The engine is fully implemented and reachable via `risa --tasks "…"`:
    hierarchical retrieval. Oversized (`large`) tasks are automatically
    re-chunked into per-file subtasks, and every task is guaranteed a
    verification step.
-2. **Execute** (`agent.executor`) — `agent/execution/executor.py` walks the graph, runs
+2. **Execute** (`agent.execution.executor`, shim `agent.executor`) — `agent/execution/executor.py` walks the graph, runs
    each ready task with a **task-scoped system prompt**, then verifies it
    against its acceptance criteria (each `run …` verification step must exit 0)
    before marking it complete. Implementing tasks with no declared verification
@@ -344,7 +346,7 @@ python -m pip install -r requirements.txt   # or: python -m pip install -e ".[de
 python -m pytest                            # venv python on Windows; macOS/Linux devs: .venv/bin/python -m pytest -q (python -> python3 fallback automatic)
 ```
 
-> Cross-platform dev: `pytest` is cross-platform (macOS/Linux fallback `python` -> `python3` is automatic in `agent/tools/core.py:508`). The full runtime (`risa --ui`/`--tui`) remains Windows-only.
+> Cross-platform dev: `pytest` is cross-platform (macOS/Linux fallback `python` -> `python3` is automatic in `agent/tools/core.py:507`). The full runtime (`risa --ui`/`--tui`) remains Windows-only.
 
 All tests run offline against scripted fake clients and an in-process mock
 Ollama server — **no Ollama required**. The skipped tests are the opt-in live
