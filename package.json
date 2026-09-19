@@ -1,0 +1,13 @@
+{
+  "name": "ascs",
+  "version": "0.3.0",
+  "private": true,
+  "description": "A.S.C.S. — A Smart Coding System (one-command launcher)",
+  "scripts": {
+    "ascs": "node scripts/ascs.mjs",
+    "ascs:check": "node scripts/ascs.mjs --check",
+    "ascs:doctor": "node scripts/ascs.mjs --doctor",
+    "ascs:test": "node scripts/ascs.mjs --test",
+    "ASCS": "npm run ascs --"
+  }
+}
