@@ -406,13 +406,27 @@ def chunk_graph(
             continue
 
         pieces: list[tuple[str, str, list[str]]] = []
-        for index, file in enumerate(task.files[:max_files_per_task], start=1):
+        # One subtask per file for the first batch; any files beyond
+        # max_files_per_task are grouped into follow-on subtasks so no
+        # declared file is ever dropped (previous code truncated them).
+        head, tail = task.files[:max_files_per_task], task.files[max_files_per_task:]
+        for index, file in enumerate(head, start=1):
+            pieces.append((f"{task.id}.{index}", f"{task.title}: {file}", [file]))
+        tail_groups = [
+            tail[i : i + max_files_per_task]
+            for i in range(0, len(tail), max_files_per_task)
+        ]
+        for group_number, group in enumerate(tail_groups, start=1):
             pieces.append(
-                (f"{task.id}.{index}", f"{task.title}: {file}", [file])
+                (
+                    f"{task.id}.{len(pieces) + 1}",
+                    f"{task.title}: more files {group_number}/{len(tail_groups)}",
+                    group,
+                )
             )
         if not pieces:
             pieces.append((f"{task.id}.1", task.title, []))
-        if task.commands and len(pieces) < max_files_per_task + 1:
+        if task.commands:
             pieces.append(
                 (
                     f"{task.id}.{len(pieces) + 1}",

@@ -4,9 +4,12 @@ Checks (read-only, no Ollama required):
 
 - No runtime code imports from ``phases/`` (agent/, tests/, scripts/).
 - All ``agent.<domain>`` packages import cleanly (old + new paths).
-- ``python -m agent.terminal --check`` and ``--list-models`` exit 0
-  (requires a running Ollama for full green; reports otherwise).
 - pytest collection still discovers the suite.
+
+NOTE: earlier revisions of this docstring also promised
+``--check``/``--list-models`` CLI checks; those are exercised by the
+pytest suites (``tests/core/test_doctor.py``, ``tests/terminal/``),
+not by this script.
 
 Usage (Windows PowerShell)::
 

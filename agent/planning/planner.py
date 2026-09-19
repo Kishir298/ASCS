@@ -28,8 +28,8 @@ COMPLEXITIES = ("small", "medium", "large")
 KINDS = ("plan", "inspect", "implement", "verify", "review")
 
 # A huge task is one the model flags as needing broad changes; we re-split it.
-# Max-chunking: 8 allows 300k tasks to fan-out into many feasible subtasks
-MAX_FILES_BEFORE_SPLIT = 8
+# Max-chunking: file batching lives in execution.tasks.chunk_graph
+# (max_files_per_task=8); the planner keeps full file lists (no truncation).
 
 _PLACEHOLDER_RE = re.compile(
     r"^(no (explicit )?plan|none|n/?a|tbd|placeholder|not provided|todo)$",
@@ -133,10 +133,9 @@ def parse_tasks(value: Any) -> list[dict]:
         complexity = _normalise_complexity(item.get("complexity", item.get("size")))
         kind = _normalise_kind(item.get("kind"))
 
-        # Auto-split broad tasks that list many files.
+        # Keep the full file list: downstream chunk_graph() batches
+        # oversized file sets into bounded subtasks without dropping any.
         files = _as_str_list(item.get("files", item.get("touch")))
-        if complexity == "large" and len(files) > MAX_FILES_BEFORE_SPLIT:
-            files = files[:MAX_FILES_BEFORE_SPLIT]
 
         dependencies = _as_dependencies(
             item.get("dependencies", item.get("depends_on", item.get("deps")))
@@ -344,24 +343,26 @@ def plan_objective(
 def _parse_chat_to_value(raw: str) -> Any:
     """Extract a JSON value from a model reply (tolerant).
 
-    Uses :func:`agent.models.parse_model_reply`'s extraction logic without the
-    tool/done contract, returning the first top-level JSON object found, or the
-    raw text if no JSON is present (so textual lists still work).
+    Mirrors :func:`agent.core.loop._chat_value`: returns the first top-level
+    JSON object *or array* found, or the raw text if no JSON is present
+    (so textual lists still work).
     """
     import json
 
     text = (raw or "").strip()
     if not text:
         return None
-    start = text.find("{")
-    if start < 0:
-        return text
-    decoder = json.JSONDecoder()
-    try:
-        obj, _ = decoder.raw_decode(text[start:])
-        return obj
-    except (json.JSONDecodeError, ValueError):
-        return text
+    for opener in ("{", "["):
+        start = text.find(opener)
+        if start < 0:
+            continue
+        decoder = json.JSONDecoder()
+        try:
+            obj, _ = decoder.raw_decode(text[start:])
+            return obj
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return text
 
 
 def plan_text(graph: TaskGraph) -> str:

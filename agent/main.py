@@ -144,13 +144,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--num-ctx",
         type=int,
         default=None,
-        help="Qwen3 context window size in tokens (default: 32768).",
+        help="Qwen3 context window size in tokens (default: 65536).",
     )
     parser.add_argument(
         "--num-predict",
         type=int,
         default=None,
-        help="Max tokens generated per request (default: 8192).",
+        help="Max tokens generated per request (default: 16384).",
     )
     parser.add_argument(
         "--max-retries",

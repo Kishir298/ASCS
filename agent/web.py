@@ -402,7 +402,8 @@ class App:
         self._server = ASCSHTTPServer((self.config.ui_host, self.config.ui_port), self)
         self.warm_status()
         host, port = self._server.server_address[:2]
-        return f"http://127.0.0.1:{port}"
+        display_host = host if host not in ("0.0.0.0", "::") else "127.0.0.1"
+        return f"http://{display_host}:{port}"
 
     def warm_status(self) -> None:
         """Probe Ollama once at startup so the very first /api/status is fast."""

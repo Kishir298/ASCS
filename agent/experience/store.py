@@ -15,6 +15,7 @@ import json
 import re
 import threading
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -48,7 +49,9 @@ class Experience:
         self.score = max(-1.0, min(1.0, float(self.score)))
 
         if not self.experience_id:
-            self.experience_id = f"{int(self.timestamp * 1000)}"
+            # Millisecond timestamps collide under burst saves (update_feedback
+            # takes the first match); uuid suffix keeps IDs unique.
+            self.experience_id = f"{int(self.timestamp * 1000)}-{uuid.uuid4().hex[:8]}"
 
     def to_record(self) -> dict:
         """Return a JSON-serializable representation."""

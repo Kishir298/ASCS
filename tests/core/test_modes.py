@@ -7,7 +7,7 @@ import json
 from agent.config import AgentConfig
 from agent.state import COMPLETE, EXECUTING, PLANNING
 
-from test_loop import make_loop, tool_call
+from tests.core.test_loop import make_loop, tool_call
 
 
 def test_plan_mode_never_modifies_files(tmp_path):
