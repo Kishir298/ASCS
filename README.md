@@ -37,9 +37,22 @@ real STOP/cancellation.
 
 ## Install (Windows PowerShell)
 
-Create a virtual environment and install the project from `requirements.txt`
-(which installs the package itself — providing the `risa` entry point — plus
-the test/development dependency):
+> **Fastest path (recommended):** one command does it all — venv,
+> dependencies, Ollama server start, model check, then the TUI:
+>
+> ```powershell
+> cd C:\Users\<you>\Desktop\RISARMS\ASCS
+> npm run ASCS
+> ```
+>
+> Useful variants: `npm run ascs:check` (readiness probe), `npm run
+> ascs:doctor` (14 diagnostics), `npm run ascs:test` (full suite), and
+> `npm run ASCS -- --check` (forward any risa flags after `--`). The
+> launcher starts a `ollama serve` it owns when none is running and stops
+> only that owned server on exit; a pre-existing server is left running
+> (`AGENT_STOP_OLLAMA_ON_EXIT=false` is set automatically for it).
+
+Manual setup (if you prefer venv by hand):
 
 ```powershell
 cd C:\Users\<you>\Desktop\RISARMS\ASCS
@@ -62,18 +75,19 @@ risa --check
 ```
 
 If you can't activate the environment, call the venv's interpreter directly:
-`.\.venv\Scripts\python.exe -m agent --doctor`.
+`.\.venv\Scripts\python.exe -m agent.terminal --doctor`.
 
 The project is a zero-runtime-dependency package (standard library only),
 so a fresh clone needs only `pip install -r requirements.txt` in a valid
 venv to run `risa`.
 
 > **No-activation alternative:** the checked-in `risa.cmd` launcher runs the
-> venv directly (`.venv\Scripts\python.exe -m agent %*`) and works without
-> activating the environment, as long as `.venv` has been created and
-> `requirements.txt` installed.
+> venv's terminal entry directly (`.venv\Scripts\python.exe -m
+> agent.terminal %*`, TUI by default) and works without activating the
+> environment, as long as `.venv` has been created and `requirements.txt`
+> installed.
 
-The default model is `qwen3-coder:30b` (fallback `qwen2.5-coder:14b` for 16 GB via `--model`/`OLLAMA_MODEL`). If the primary model is not installed but the fallback is, the agent switches to it once and retries. Override per run with `--model`, or set any model via environment variables (see Configuration). Closing the CLI stops the Ollama server (`AGENT_STOP_OLLAMA_ON_EXIT=false` opts out; diagnostics never stop it).
+The default model is `qwen3-coder:30b` (fallback `qwen2.5-coder:14b` for 16 GB via `--model`/`OLLAMA_MODEL`). If the primary model is not installed but the fallback is, the agent switches to it once and retries. Override per run with `--model`, or set any model via environment variables (see Configuration). Closing the CLI stops a launcher-/CLI-owned Ollama server; a pre-existing server is left running (`AGENT_STOP_OLLAMA_ON_EXIT=false` opts out explicitly; diagnostics never stop it).
 
 ## Quick start
 
