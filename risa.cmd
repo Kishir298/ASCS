@@ -1,6 +1,6 @@
 @echo off
-rem risa launcher (AppControl-safe shim for `python -m agent`)
+rem risa launcher (AppControl-safe shim for the terminal entry point)
 setlocal
 set "SCRIPT_DIR=%~dp0"
-"%SCRIPT_DIR%.venv\Scripts\python.exe" -m agent %*
+"%SCRIPT_DIR%.venv\Scripts\python.exe" -m agent.terminal %*
 endlocal

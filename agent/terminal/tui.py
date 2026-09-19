@@ -4326,7 +4326,12 @@ def run_tui(
         )
 
         print(
-            "  python -m agent --tui",
+            "  python -m agent.terminal",
+            file=sys.stderr,
+        )
+
+        print(
+            "  (or: npm run ASCS)",
             file=sys.stderr,
         )
 

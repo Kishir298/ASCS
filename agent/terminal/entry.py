@@ -104,7 +104,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.doctor:
         return _cmd_doctor(config)
 
-    print(ASCII_BANNER, flush=True)
+    try:
+        # Box-drawing banner needs UTF-8; legacy consoles (cp1252/cp437)
+        # would crash here before the TUI even starts.
+        print(ASCII_BANNER, flush=True)
+    except UnicodeEncodeError:
+        print("A.S.C.S. - A SMART CODING SYSTEM", flush=True)
 
     rc = _cmd_tui(config, client)
     from agent.models.proc import maybe_stop_ollama_on_exit
