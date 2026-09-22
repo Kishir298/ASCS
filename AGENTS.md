@@ -26,11 +26,11 @@ opt-in step. Max-chunking splits 300k-token objectives into ~8k shards within th
 ## Test commands
 
 - Full deterministic suite: `pytest -q` (expect `564 passed, 6 skipped` after TUI; legacy `538 passed, 5 skipped`)
-- Ollama client unit tests: `pytest -q tests/test_ollama.py`
-- Experience-store / pipeline tests: `pytest -q tests/test_experience_pipeline.py`
+- Ollama client unit tests: `pytest -q tests/integration/test_ollama.py`
+- Experience-store / pipeline tests: `pytest -q tests/experience/test_experience_pipeline.py`
 - Live smoke (opt-in, requires running Ollama + `qwen3-coder:30b`):
-  - bash: `RISALIVE=1 pytest -q tests/test_ollama_live.py`
-  - PowerShell: `$env:RISALIVE="1"; pytest -q tests/test_ollama_live.py`
+  - bash: `RISALIVE=1 pytest -q tests/integration/test_ollama_live.py`
+  - PowerShell: `$env:RISALIVE="1"; pytest -q tests/integration/test_ollama_live.py`
 
 Live-model note: `test_live_ollama_tiny_chat_non_empty` uses a **non-streaming**
 chat with a 180 s client-timeout ceiling (raised from 30 s to accommodate
