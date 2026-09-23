@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import ctypes
 import json
+import os
 import queue
 import threading
 import time as _time
+import warnings
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -38,6 +40,20 @@ from .workspace import Workspace
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
 INDEX_HTML: str | None = None
+
+
+def ui_token() -> str:
+    """Bearer token guarding mutating/SSE endpoints (``AGENT_UI_TOKEN``).
+
+    Empty means no token is configured: endpoints stay open for backward
+    compatibility (local single-user use). When set, clients must send
+    ``Authorization: Bearer <token>``.
+    """
+    return os.environ.get("AGENT_UI_TOKEN", "").strip()
+
+
+def _is_wildcard_host(host: str) -> bool:
+    return (host or "").strip() in ("0.0.0.0", "::", "")
 
 
 def _load_index() -> str:
@@ -268,6 +284,22 @@ class _Handler(BaseHTTPRequestHandler):
         except OSError:
             self.close_connection = True
 
+    def _require_ui_auth(self) -> bool:
+        """Enforce ``AGENT_UI_TOKEN`` when configured (backward compatible).
+
+        Returns True when the request is authorized. When a token is
+        configured and the ``Authorization: Bearer <token>`` header is
+        missing or wrong, a 401 is sent and False is returned.
+        """
+        token = ui_token()
+        if not token:
+            return True
+        auth = self.headers.get("Authorization", "") or ""
+        if auth.strip() == f"Bearer {token}":
+            return True
+        self._send_json(401, {"error": "unauthorized"})
+        return False
+
     # -- routing ------------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802 (http.server API)
@@ -285,6 +317,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(200, self.app.status())
             return
         if path == "/api/events":
+            if not self._require_ui_auth():
+                return
             self._stream_events()
             return
         self._send_json(404, {"error": "not found"})
@@ -292,6 +326,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 (http.server API)
         path = self.path.split("?")[0].rstrip("/")
         if path == "/api/task":
+            if not self._require_ui_auth():
+                return
             data = self._read_json()
             task = (data.get("task") or "").strip()
             if not task:
@@ -309,10 +345,14 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(202, {"started": True, "mode": self.app.runner.mode})
             return
         if path == "/api/stop":
+            if not self._require_ui_auth():
+                return
             was_busy = self.app.runner.cancel()
             self._send_json(200, {"cancelling": was_busy, "busy": self.app.runner.busy})
             return
         if path == "/api/clear":
+            if not self._require_ui_auth():
+                return
             self.app.hub.clear()
             self.app.runner.tracker.reset()
             self._send_json(200, {"cleared": True})
@@ -399,6 +439,15 @@ class App:
 
     def bind(self) -> str:
         """Bind the server (non-blocking); returns the URL."""
+        host = self.config.ui_host or "127.0.0.1"
+        if _is_wildcard_host(host) and not ui_token():
+            msg = (
+                "[web] WARNING: binding to 0.0.0.0 without AGENT_UI_TOKEN: "
+                "/api/task|stop|clear|events are unauthenticated. "
+                "Set AGENT_UI_TOKEN or bind to 127.0.0.1."
+            )
+            print(msg)
+            warnings.warn(msg, UserWarning, stacklevel=2)
         self._server = ASCSHTTPServer((self.config.ui_host, self.config.ui_port), self)
         self.warm_status()
         host, port = self._server.server_address[:2]
@@ -527,4 +576,5 @@ __all__ = [
     "TaskRunner",
     "interrupt_thread",
     "serve",
+    "ui_token",
 ]

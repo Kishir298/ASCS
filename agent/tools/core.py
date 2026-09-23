@@ -267,10 +267,31 @@ def _search_files(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
     )
 
 
+def _reject_protected_path(rel: Path, path_str: str) -> None:
+    """Refuse writes/deletes/moves touching VCS metadata or ASCS state.
+
+    Uses ``rel.parts`` so ``.ascs``/``.git`` match at any depth
+    (``.ascs/x``, ``sub/.ascs/y``) and not just the leaf name.
+    """
+    if any(part in (".git", ".github", ".ascs") for part in rel.parts):
+        raise ToolValidationError(
+            f"Refusing to modify protected path {path_str!r} "
+            f"(inside {rel.parts[0] if rel.parts else rel})."
+        )
+
+
+def _rel_or_raise(ws: Workspace, target: Path, path_str: str) -> Path:
+    try:
+        return target.relative_to(ws.root)
+    except ValueError:
+        raise ToolValidationError(f"Path resolves outside the workspace: {path_str}")
+
+
 def _write_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
     path = _require(args, "path", str)
     content = _require(args, "content", str)
     target = ws.resolve(path)
+    _reject_protected_path(_rel_or_raise(ws, target, path), path)
     target.parent.mkdir(parents=True, exist_ok=True)
 
     data = content.encode("utf-8")
@@ -289,6 +310,7 @@ def _apply_patch(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
     old_text = _require(args, "old_text", str)
     new_text = _require(args, "new_text", str)
     target = ws.resolve(path)
+    _reject_protected_path(_rel_or_raise(ws, target, path), path)
     if not target.is_file():
         raise ToolValidationError(f"Not a regular file: {path}")
 
@@ -336,6 +358,7 @@ def _delete_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
         rel = target.relative_to(ws.root)
     except ValueError:
         raise ToolValidationError(f"Path resolves outside the workspace: {path}")
+    _reject_protected_path(rel, path)
     if any(part in (".git", ".github") for part in rel.parts):
         raise ToolValidationError(
             f"Refusing to delete version-control metadata at {path!r}."
@@ -360,6 +383,8 @@ def _move_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
     destination = _require(args, "destination", str)
     src = ws.resolve(path)
     dst = ws.resolve(destination)
+    _reject_protected_path(_rel_or_raise(ws, src, path), path)
+    _reject_protected_path(_rel_or_raise(ws, dst, destination), destination)
     if src == ws.root:
         raise ToolValidationError("Refusing to move the workspace root itself.")
     if not src.exists() and not src.is_symlink():
@@ -385,6 +410,8 @@ def _copy_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
     destination = _require(args, "destination", str)
     src = ws.resolve(path)
     dst = ws.resolve(destination)
+    _reject_protected_path(_rel_or_raise(ws, src, path), path)
+    _reject_protected_path(_rel_or_raise(ws, dst, destination), destination)
     if not src.is_file():
         raise ToolValidationError(f"Source is not a regular file: {path}")
     if dst.exists() and not dst.is_dir():

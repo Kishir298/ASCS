@@ -15,6 +15,7 @@ from pathlib import Path
 IGNORED_NAMES = {
     ".git",
     ".github",
+    ".ascs",
     ".venv",
     "venv",
     "env",

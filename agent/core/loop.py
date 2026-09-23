@@ -233,6 +233,7 @@ class AgentLoop:
         self._conversational: bool = False
         self._gate_violations: int = 0
         self._fallback_attempted: bool = False
+        self._git_baseline: set[str] | None = None
         self.experience: ExperienceStore | None = (
             ExperienceStore(path=config.experience_path)
             if config.experience_enabled
@@ -1070,6 +1071,17 @@ class AgentLoop:
         if is_command:
             self._emit_command("start", arguments.get("command", ""))
 
+        # Git-dirty guard (mirrors executor.py:_check_git_dirty): never
+        # overwrite files that had pre-existing uncommitted changes when the
+        # run started. Baseline is captured lazily on first mutating tool
+        # call; non-repos / git failures yield an empty baseline (no block).
+        git_block = self._check_git_dirty(tool, arguments)
+        if git_block is not None:
+            self._step(f"[{iteration:02d}] {tool}: GIT-BLOCKED ({git_block.output[:100]})")
+            elapsed = _time.monotonic() - started
+            emit_tool_completed(self.event_sink, tool, ok=False, target=target, elapsed=elapsed)
+            return git_block
+
         if self.config.is_safe_mode and tool in MODIFY_TOOLS:
             display_args = _json.dumps(sorted(arguments.items()))
             if not self.approver(f"{tool} {display_args}"):
@@ -1137,6 +1149,52 @@ class AgentLoop:
             return -1  # non-zero sentinel: a timeout is never success
         m = re.search(r"exit code (\d+)", note or "")
         return int(m.group(1)) if m else 0
+
+    def _ensure_git_baseline(self) -> set[str]:
+        """Capture pre-run dirty files once (excludes ASCS state)."""
+        if self._git_baseline is None:
+            baseline: set[str] = set()
+            try:
+                from agent.context.index import git_status as _git_status_fn
+
+                raw = _git_status_fn(self.ws.root)
+                for line in (raw or "").splitlines():
+                    parts = line.split(maxsplit=1)
+                    if len(parts) == 2:
+                        path = parts[1].strip()
+                        if path and not path.startswith(".ascs"):
+                            baseline.add(path)
+            except Exception:  # noqa: BLE001 - git must never block the loop
+                baseline = set()
+            self._git_baseline = baseline
+        return self._git_baseline
+
+    def _check_git_dirty(self, tool: str, arguments: dict[str, Any]) -> ToolResult | None:
+        """Block writes to files dirty before the run (cf. executor.py:709)."""
+        if tool not in (
+            "write_file",
+            "apply_patch",
+            "delete_file",
+            "move_file",
+            "copy_file",
+        ):
+            return None
+        baseline = self._ensure_git_baseline()
+        if not baseline:
+            return None
+        target_path = arguments.get("path") or arguments.get("destination") or ""
+        if not target_path or not isinstance(target_path, str):
+            return None
+        target_rel = target_path.replace("\\", "/").strip()
+        if target_rel in baseline:
+            return ToolResult(
+                tool,
+                f"Protected: '{target_rel}' has pre-existing uncommitted changes. "
+                "ASCS will not overwrite existing user work. Proceed with a "
+                "different file or complete the current changes manually.",
+                ok=False,
+            )
+        return None
 
     def _bump_malformed(self, iteration: int) -> bool:
         """Count a malformed/unusable reply; True when the retry limit is hit."""
