@@ -6,8 +6,7 @@ When running the test suite, always **skip tests that require the local
 `qwen3-coder:30b` (fallback `qwen2.5-coder:14b` on 16GB) Ollama model** or a running live Ollama server.
 
 - The live tests are opt-in and gated behind `RISALIVE=1`. They are correctly
-  **skipped by default** (`538 passed, 5 skipped` on the reference Windows
-  machine after max-chunking; the exact counts vary with platform/plugins).
+  **skipped by default** (exact counts vary with platform/plugins — re-verify locally).
 - Do **not** set `RISALIVE=1` unless the user explicitly asks for live
   integration testing.
 - Confirm `RISALIVE` is unset in the environment before running `pytest`, and
@@ -25,7 +24,7 @@ opt-in step. Max-chunking splits 300k-token objectives into ~8k shards within th
 
 ## Test commands
 
-- Full deterministic suite: `pytest -q` (expect `564 passed, 6 skipped` after TUI; legacy `538 passed, 5 skipped`)
+- Full deterministic suite: `pytest -q` (exact counts vary by platform/plugins — re-verify locally)
 - Ollama client unit tests: `pytest -q tests/integration/test_ollama.py`
 - Experience-store / pipeline tests: `pytest -q tests/experience/test_experience_pipeline.py`
 - Live smoke (opt-in, requires running Ollama + `qwen3-coder:30b`):

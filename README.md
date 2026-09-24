@@ -368,7 +368,7 @@ checks that need a real local `qwen3-coder:30b` (or `qwen2.5-coder:14b` fallback
 gated behind `RISALIVE=1`:
 
 ```powershell
-$env:RISALIVE="1"; pytest -q tests/test_ollama_live.py   # bash: RISALIVE=1 pytest -q ...
+$env:RISALIVE="1"; pytest -q tests/integration/test_ollama_live.py   # bash: RISALIVE=1 pytest -q tests/integration/test_ollama_live.py
 $env:RISALIVE=""
 ```
 

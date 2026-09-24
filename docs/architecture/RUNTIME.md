@@ -16,7 +16,7 @@
   `--list-models`, `--model`, `--base-url`, `--intelligence`, `--provider`,
   plus generation knobs. Dispatch: `_cmd_check` / `_cmd_doctor` /
   `_cmd_list_models` / `_cmd_tui` / `run_agent` / `run_graph_agent`.
-- `risa.cmd` is an AppControl-safe shim (`.venv\Scripts\python.exe -m agent`).
+- `risa.cmd` is an AppControl-safe shim (`.venv\Scripts\python.exe -m agent.terminal`).
 
 ## Startup
 

@@ -78,7 +78,7 @@ never block normal development/CI — see `AGENTS.md`):
 
 ```powershell
 $env:RISALIVE="1"
-pytest -q tests/test_ollama_live.py
+pytest -q tests/integration/test_ollama_live.py
 $env:RISALIVE=""
 ```
 
@@ -187,7 +187,7 @@ opencode
 - [ ] `curl.exe http://localhost:11434/api/tags` lists `qwen3-coder:30b`
 - [ ] `risa --check` reports reachable and available
 - [ ] `risa --list-models` shows `qwen3-coder:30b` INSTALLED
-- [ ] `RISALIVE=1 pytest -q tests/test_ollama_live.py` → 4 passed
+- [ ] `RISALIVE=1 pytest -q tests/integration/test_ollama_live.py` → 4 passed
 - [ ] OpenCode `/models` shows `ollama/qwen3-coder:30b`
 - [ ] "OPENCODE LOCAL QWEN TEST OK" probe returns exactly
 - [ ] Repo-inspection tool-call probe succeeds
