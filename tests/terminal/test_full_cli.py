@@ -1,9 +1,9 @@
 """Combined CLI interface tests — union of CLI-related suites.
 
 Sources (kept as duplicates for rollback / safety):
-  - tests/test_cli.py (4 tests) — lightweight CLI parser / main entry
-  - tests/test_tui_spec.py (14 tests) — TUI spec verification
-  - tests/test_shell_redesign.py (28 tests) — shell redesign tiers/cursor/theme/pickers
+  - tests/terminal/test_cli.py (4 tests) — lightweight CLI parser / main entry
+  - tests/terminal/test_tui_spec.py (14 tests) — TUI spec verification
+  - tests/terminal/test_shell_redesign.py (28 tests) — shell redesign tiers/cursor/theme/pickers
 
 Total: 46 tests, no name collisions (verified via ast).
 This file deduplicates top-level imports and preserves each test body verbatim
@@ -65,7 +65,7 @@ from agent.tui import (
 tui_build_picker_items = build_picker_items
 
 # =============================================================================
-# Section 1 — tests/test_cli.py (4 tests)
+# Section 1 — tests/terminal/test_cli.py (4 tests)
 # Lightweight CLI tests that avoid needing a live Ollama server.
 # =============================================================================
 
@@ -118,7 +118,7 @@ def test_unknown_argument_is_error():
 
 
 # =============================================================================
-# Section 2 — tests/test_tui_spec.py (14 tests)
+# Section 2 — tests/terminal/test_tui_spec.py (14 tests)
 # Spec verification for the TUI CLI interface.
 # =============================================================================
 
@@ -318,7 +318,7 @@ def test_ollama_compatible_guarantee():
 
 
 # =============================================================================
-# Section 3 — tests/test_shell_redesign.py (28 tests)
+# Section 3 — tests/terminal/test_shell_redesign.py (28 tests)
 # Shell redesign verification — tiers, cursor, theme, pickers, resize.
 # =============================================================================
 

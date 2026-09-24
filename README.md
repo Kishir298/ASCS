@@ -31,7 +31,7 @@ real STOP/cancellation.
 > **Platform note:** The full runtime (`risa --ui` / `--tui`, Ollama) is
 > **Windows-only** (32 GB recommended target). **Dev testing (`pytest`) is
 > cross-platform:** on macOS/Linux `python` transparently falls back to
-> `python3` at execution time (`agent/tools/core.py:507`), so `pytest` passes
+> `python3` at execution time (`agent/tools/core.py:534`), so `pytest` passes
 > inside or outside a venv. Use `.venv/bin/python -m pytest -q` on any OS for
 > the canonical run.
 
@@ -360,7 +360,7 @@ python -m pip install -r requirements.txt   # or: python -m pip install -e ".[de
 python -m pytest                            # venv python on Windows; macOS/Linux devs: .venv/bin/python -m pytest -q (python -> python3 fallback automatic)
 ```
 
-> Cross-platform dev: `pytest` is cross-platform (macOS/Linux fallback `python` -> `python3` is automatic in `agent/tools/core.py:507`). The full runtime (`risa --ui`/`--tui`) remains Windows-only.
+> Cross-platform dev: `pytest` is cross-platform (macOS/Linux fallback `python` -> `python3` is automatic in `agent/tools/core.py:534`). The full runtime (`risa --ui`/`--tui`) remains Windows-only.
 
 All tests run offline against scripted fake clients and an in-process mock
 Ollama server — **no Ollama required**. The skipped tests are the opt-in live

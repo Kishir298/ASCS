@@ -7,7 +7,7 @@ model or server.
 
 Run them with:
 
-    RISALIVE=1 pytest -q tests/test_ollama_live.py
+    RISALIVE=1 pytest -q tests/integration/test_ollama_live.py
 
 Requirements to actually execute (not just collect):
     * Ollama is running at OLLAMA_BASE_URL (default http://localhost:11434).
