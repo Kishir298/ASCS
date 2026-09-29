@@ -1268,6 +1268,62 @@ class AgentLoop:
             plan=plan,
         )
 
+    def export_handover_state(self) -> dict:
+        """Export current session state for ASIS handover.
+        
+        Returns a serializable dict containing:
+        - task: the original task/objective
+        - plan: current plan if any
+        - completed_actions: list of completed actions with results
+        - observations: key observations from execution
+        - partial_results: any partial results from tools
+        - context_index_ref: path to .ascs/context_index.json
+        - experience_tags: relevant experience tags for continuation
+        - workspace: workspace path
+        - timestamp: ISO format timestamp
+        """
+        import json
+        from datetime import datetime, timezone
+        
+        # Get context index reference
+        context_index_ref = str(self.ws.root / ".ascs" / "context_index.json")
+        
+        # Extract experience tags if available
+        experience_tags = []
+        if self.experience:
+            try:
+                # Get recent experiences related to current task
+                recent = self.experience.search(self._task_text, limit=5)
+                for exp in recent:
+                    if exp.get("tags"):
+                        experience_tags.extend(exp["tags"])
+            except Exception:
+                pass
+        
+        # Get completed actions from steps
+        completed_actions = []
+        for step in self._steps:
+            if step.startswith("[") and (": " in step):
+                # Parse step format: "[NN] tool: result"
+                parts = step.split(": ", 1)
+                if len(parts) == 2:
+                    completed_actions.append({
+                        "step": parts[0].strip(),
+                        "result": parts[1].strip()
+                    })
+        
+        return {
+            "task": self._task_text,
+            "plan": self._plan.to_text() if self._plan else None,
+            "completed_actions": completed_actions,
+            "observations": self._steps[-10:] if self._steps else [],
+            "partial_results": {},
+            "context_index_ref": context_index_ref,
+            "experience_tags": list(set(experience_tags)),  # deduplicate
+            "workspace": str(self.ws.root),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
 
 def run_agent(
     config: AgentConfig,
