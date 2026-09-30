@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .config import AgentConfig, MODES
+from .config import MODES, AgentConfig
 from .events import AgentEvent
 from .loop import AgentLoop, LoopResult
 from .state import IDLE, STATE_LABELS, StateTracker
@@ -243,7 +243,7 @@ class _Handler(BaseHTTPRequestHandler):
     # -- helpers ------------------------------------------------------------
 
     @property
-    def app(self) -> "App":
+    def app(self) -> App:
         return self.server.app  # type: ignore[attr-defined]
 
     def _send_json(self, status: int, payload: Any) -> None:
@@ -302,7 +302,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- routing ------------------------------------------------------------
 
-    def do_GET(self) -> None:  # noqa: N802 (http.server API)
+    def do_GET(self) -> None:
         path = self.path.split("?")[0].rstrip("/") or "/"
         if path == "/":
             self._send_asset()
@@ -323,7 +323,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._send_json(404, {"error": "not found"})
 
-    def do_POST(self) -> None:  # noqa: N802 (http.server API)
+    def do_POST(self) -> None:
         path = self.path.split("?")[0].rstrip("/")
         if path == "/api/task":
             if not self._require_ui_auth():
@@ -400,7 +400,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _sse_write(self, event_name: str, payload: Any) -> None:
         data = json.dumps(payload, ensure_ascii=False)
-        self.wfile.write(f"event: {event_name}\ndata: {data}\n\n".encode("utf-8"))
+        self.wfile.write(f"event: {event_name}\ndata: {data}\n\n".encode())
         self.wfile.flush()
 
     def log_message(self, fmt: str, *args: Any) -> None:  # keep console quiet-ish
@@ -411,7 +411,7 @@ class ASCSHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, addr: tuple[str, int], app: "App") -> None:
+    def __init__(self, addr: tuple[str, int], app: App) -> None:
         super().__init__(addr, _Handler)
         self.app = app
 
@@ -570,8 +570,8 @@ def serve(
 
 
 __all__ = [
-    "App",
     "ASCSHTTPServer",
+    "App",
     "EventHub",
     "TaskRunner",
     "interrupt_thread",

@@ -21,11 +21,11 @@ same tool contract as the main loop.
 
 from __future__ import annotations
 
-import time as _time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
-from agent.config import AgentConfig, MODIFY_TOOLS, READONLY_TOOLS
+from agent.config import MODIFY_TOOLS, AgentConfig
 from agent.events import (
     EventSink,
     emit_activity,
@@ -39,10 +39,18 @@ from agent.events import (
     emit_verification_started,
     null_sink,
 )
+from agent.execution.tasks import (
+    COMPLETED,
+    FAILED,
+    READY,
+    RUNNING,
+    SKIPPED,
+    Task,
+    TaskGraph,
+)
 from agent.models import ToolResult, parse_model_reply, tool_result_message
 from agent.ollama import OllamaClient, OllamaError, OllamaResponseError, resilient_chat
 from agent.planning.prompts import system_prompt
-from agent.execution.tasks import COMPLETED, FAILED, PENDING, READY, RUNNING, SKIPPED, Task, TaskGraph
 from agent.tools import execute_tool
 from agent.workspace import Workspace
 
@@ -243,8 +251,8 @@ class TaskExecutor:
         event_sink: EventSink | None = None,
         log: Callable[[str], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
-        run_task: Callable[["TaskExecutor", Task], TaskOutcome] | None = None,
-        verify: Callable[["TaskExecutor", Task], VerificationResult] | None = None,
+        run_task: Callable[[TaskExecutor, Task], TaskOutcome] | None = None,
+        verify: Callable[[TaskExecutor, Task], VerificationResult] | None = None,
         approver: Callable[[str], bool] | None = None,
         git_baseline: set[str] | None = None,
         intent: Any | None = None,
@@ -686,7 +694,6 @@ class TaskExecutor:
         self, tool: str, arguments: dict[str, Any], task: Task, iteration: int
     ) -> ToolResult:
         if tool not in self.config.effective_tools:
-            from agent.planning.prompts import tool_error_feedback
 
             return ToolResult(
                 tool,
@@ -847,8 +854,8 @@ def _action_target(tool: str, arguments: dict[str, Any]) -> str:
 
 __all__ = [
     "TaskActionLog",
-    "TaskExecutor",
     "TaskExecution",
+    "TaskExecutor",
     "TaskOutcome",
     "VerificationResult",
     "task_system_prompt",

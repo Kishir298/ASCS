@@ -20,14 +20,12 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
-import os
 import re
 import subprocess
 import time
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable, Iterator
-
 
 DEFAULT_CHUNK_TOKENS = 8192  # primary qwen3-coder:30b chunk (fallback qwen2.5-coder:14b uses 4096)
 DEFAULT_CHUNK_TOKENS_30B = 8192  # qwen3-coder:30b (65k ctx, high/xhigh 131k)
@@ -1105,9 +1103,7 @@ class ProjectIndex:
                 f"{module_basename}_test.py",
                 f"test_{module_basename.lower()}.py",
                 f"{module_basename.lower()}_test.py",
-            } and not candidate.endswith(".pyc"):
-                related.add(candidate)
-            elif (
+            } and not candidate.endswith(".pyc") or (
                 stem in candidate
                 and ("tests/" in candidate or candidate.startswith("test_"))
             ):
@@ -1224,7 +1220,7 @@ class ProjectIndex:
 
     @staticmethod
     def _chunk_id(path: str, start: int, end: int) -> str:
-        value = f"{path}:{start}:{end}".encode("utf-8")
+        value = f"{path}:{start}:{end}".encode()
         return hashlib.sha1(value).hexdigest()[:16]
 
 

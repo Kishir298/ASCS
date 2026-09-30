@@ -19,7 +19,7 @@ import pytest
 from agent.config import AgentConfig
 from agent.core.intent import fallback_spec_for
 from agent.execution.executor import TaskExecutor
-from agent.execution.tasks import Task, TaskGraph
+from agent.execution.tasks import Task
 from agent.loop import AgentLoop
 from agent.workspace import Workspace
 

@@ -20,11 +20,9 @@ from agent.core.intent import (
     QUESTION,
     VERIFICATION_REQUEST,
     WRITE_EXCLUDED_INTENTS,
-    Decision,
     classify_request,
     fallback_spec_for,
 )
-
 
 # ---------------------------------------------------------------------------
 # Scenario 1/2: conversational input must never look like work

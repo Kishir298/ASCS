@@ -20,13 +20,11 @@ dependency failed becomes ``BLOCKED``.
 
 from __future__ import annotations
 
-import json
 import time
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
-from typing import Iterable, Iterator, Sequence
 
-from agent.context.index import DEFAULT_STATE_DIR, ContextError
+from agent.context.index import ContextError
 from agent.models import Plan
 
 PENDING = "pending"
@@ -69,7 +67,7 @@ class Task:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, payload: dict) -> "Task":
+    def from_dict(cls, payload: dict) -> Task:
         known = set(cls.__dataclass_fields__)
         return cls(**{k: v for k, v in payload.items() if k in known})
 
@@ -300,7 +298,7 @@ class TaskGraph:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict) -> "TaskGraph":
+    def from_dict(cls, payload: dict) -> TaskGraph:
         graph = cls()
         for raw in payload.get("tasks", []):
             if isinstance(raw, dict):
@@ -469,10 +467,10 @@ __all__ = [
     "RUNNING",
     "SKIPPED",
     "TERMINAL_STATUSES",
+    "VALID_STATUSES",
     "Task",
     "TaskGraph",
     "TaskGraphError",
-    "VALID_STATUSES",
     "build_graph_from_specs",
     "chunk_graph",
     "plan_to_graph",

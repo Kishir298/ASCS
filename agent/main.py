@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         choices=[m.lower() for m in MODES],
         help="Agent mode: plan (inspect+plan only), build (plan then implement), "
-        f"or auto (fully autonomous). Default: AUTO.",
+        "or auto (fully autonomous). Default: AUTO.",
     )
     parser.add_argument(
         "--workspace",
@@ -229,7 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def build_config(args: argparse.Namespace) -> "AgentConfig":
+def build_config(args: argparse.Namespace) -> AgentConfig:
     """Resolve the effective config from CLI args (raises ValueError)."""
     if args.safe and args.auto:
         raise ValueError("Cannot use --safe and --auto together.")

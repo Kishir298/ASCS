@@ -178,8 +178,7 @@ def _safe_list_models_google(base_url: str, api_key: str | None, timeout: int = 
                     if isinstance(m, dict):
                         name = m.get("name") or m.get("displayName") or ""
                         # Google returns "models/gemini-1.5-pro" -> strip prefix
-                        if name.startswith("models/"):
-                            name = name[len("models/") :]
+                        name = name.removeprefix("models/")
                         if name:
                             out.append(str(name))
                 if out:

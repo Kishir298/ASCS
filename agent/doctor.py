@@ -12,12 +12,10 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
 
 from . import __version__
 from .config import AgentConfig, load_config
-from .context import (DEFAULT_INDEX_FILE, DEFAULT_STATE_DIR, ContextError,
-                      ProjectIndex)
+from .context import DEFAULT_INDEX_FILE, DEFAULT_STATE_DIR, ContextError, ProjectIndex
 from .ollama import OllamaClient
 from .workspace import Workspace, WorkspaceError
 
@@ -204,7 +202,7 @@ def _check_task_engine(cfg: AgentConfig) -> CheckResult:
     try:
         from .executor import TaskExecutor  # noqa: F401
         from .planner import plan_objective  # noqa: F401
-        from .tasks import Task, TaskGraph, build_graph_from_specs
+        from .tasks import TaskGraph, build_graph_from_specs
     except Exception as exc:  # pragma: no cover - defensive
         return CheckResult("task_engine", FAIL, f"Task engine import failed: {exc}")
     try:
@@ -371,11 +369,11 @@ def print_doctor(report: DoctorReport, *, progress: bool = False) -> None:
 
 
 __all__ = [
+    "FAIL",
+    "PASS",
+    "WARN",
     "CheckResult",
     "DoctorReport",
     "doctor",
     "print_doctor",
-    "PASS",
-    "WARN",
-    "FAIL",
 ]

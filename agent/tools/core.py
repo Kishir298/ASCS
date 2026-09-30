@@ -12,12 +12,14 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from agent.models import Plan, ToolResult, truncate
 from agent.workspace import Workspace, WorkspaceError, should_ignore
@@ -561,6 +563,9 @@ def _python_fallback_command(command: str) -> str:
     return command[:prefix_len] + "python3" + rest
 
 
+import shlex
+
+
 def _execute_process(
     command: str, cwd: Path, timeout: int
 ) -> tuple[subprocess.Popen, str, str, int | None, bool, bool]:
@@ -594,15 +599,21 @@ def _execute_process(
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
         "cwd": str(cwd),
-        "shell": True,
         "text": True,
         "encoding": "utf-8",
         "errors": "replace",
         "env": env,
     }
     if os.name == "nt":
+        # Windows: use shell=True for cmd.exe parsing of quoted strings
+        # Mitigated by: intent gating (only CODE_CHANGE), SAFE mode approval, git dirty guard
+        kwargs["shell"] = True
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    proc = subprocess.Popen(command, **kwargs)
+        proc = subprocess.Popen(command, **kwargs)
+    else:
+        # POSIX: safe parsing with shlex, no shell
+        args = shlex.split(command)
+        proc = subprocess.Popen(args, **kwargs)
     start = time.monotonic()
     timed_out = False
     killed = False
@@ -655,7 +666,7 @@ def _git_command(
             return ToolResult(name, "(not a git repository)", note="exit code 128")
         return ToolResult(name, combined.strip() or f"git exited with {rc}", ok=False)
     body = combined.strip() or {"git_status": "(clean working tree)", "git_diff": "(no changes)"}[name]
-    return ToolResult(name, body, note=f"exit code 0")
+    return ToolResult(name, body, note="exit code 0")
 
 
 def _git_status(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
@@ -972,12 +983,12 @@ def _decode_with_fallback(raw: bytes) -> tuple[str, str]:
 
 __all__ = [
     "TOOL_SPECS",
+    "TRUNCATION_MARKER",
     "ToolSpec",
     "ToolValidationError",
-    "get_tool_spec",
-    "validate_tool_call",
     "execute_tool",
+    "get_tool_spec",
     "tool_schema_text",
-    "TRUNCATION_MARKER",
     "truncate_env",
+    "validate_tool_call",
 ]

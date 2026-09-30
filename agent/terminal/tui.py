@@ -26,11 +26,9 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import (
-    AgentConfig,
-    DEFAULT_MODEL,
     DEFAULT_PROVIDER,
-    INTELLIGENCE_LEVELS,
     PROVIDER_NAMES,
+    AgentConfig,
     intelligence_values,
     load_config,
     load_tui_state,
@@ -314,7 +312,7 @@ INTEL_DISPLAY_ORDER = ("default", "low", "medium", "high", "xhigh")
 
 try:
     import curses  # type: ignore
-    import curses.textpad  # noqa: F401
+    import curses.textpad
 
     HAS_CURSES = True
 except Exception:  # pragma: no cover
@@ -1319,11 +1317,7 @@ class TuiApp:
                 if event_type in (
                     "agent_started",
                     "status",
-                ):
-                    if message:
-                        self.status_msg = message
-
-                elif event_type in (
+                ) or event_type in (
                     "thinking",
                     "activity",
                 ):
@@ -2152,8 +2146,7 @@ class TuiApp:
         # Place menu immediately above input.
         menu_y = input_y - menu_height - 1
 
-        if menu_y < 2:
-            menu_y = 2
+        menu_y = max(menu_y, 2)
 
         try:
             # Subtle separator/header.
@@ -3146,13 +3139,7 @@ class TuiApp:
             elif key in (
                 curses.KEY_DOWN,
                 258,
-            ):
-                selected = min(
-                    len(items) - 1,
-                    selected + 1,
-                )
-
-            elif key == 9:
+            ) or key == 9:
                 selected = min(
                     len(items) - 1,
                     selected + 1,
@@ -3355,13 +3342,7 @@ class TuiApp:
             elif key in (
                 curses.KEY_DOWN,
                 258,
-            ):
-                selected = min(
-                    len(INTEL_DISPLAY_ORDER) - 1,
-                    selected + 1,
-                )
-
-            elif key == 9:
+            ) or key == 9:
                 selected = min(
                     len(INTEL_DISPLAY_ORDER) - 1,
                     selected + 1,
@@ -3373,8 +3354,8 @@ class TuiApp:
 
     def _do_connect(self, stdscr) -> None:
         from agent.models.providers import (
-            DEFAULT_BASE_URLS,
             API_KEY_ENVS,
+            DEFAULT_BASE_URLS,
             list_all_providers_with_models,
             list_models_for_provider,
         )

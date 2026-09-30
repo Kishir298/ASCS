@@ -17,9 +17,8 @@ bare ``package.json`` with no scripts.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 # Marker file -> (language, package manager, [test commands], [lint commands])
 # Order matters: the first matching marker wins. Rows later in the list are

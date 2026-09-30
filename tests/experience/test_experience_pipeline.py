@@ -19,7 +19,6 @@ from agent.planner import planner_prompt
 from agent.prompts import system_prompt
 from agent.workspace import Workspace
 
-
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 class RecordingClient:

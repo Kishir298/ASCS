@@ -183,7 +183,7 @@ class Workspace:
     # -- file/listing helpers ----------------------------------------------
 
     @staticmethod
-    def iter_files(root: Path) -> "list[Path]":
+    def iter_files(root: Path) -> list[Path]:
         """Yield regular files under ``root``, skipping ignored directories."""
         files: list[Path] = []
         for dirpath, dirnames, filenames in os.walk(root):

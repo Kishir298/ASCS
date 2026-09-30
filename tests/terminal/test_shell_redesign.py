@@ -15,30 +15,27 @@ from __future__ import annotations
 import pathlib
 import tempfile
 
-import pytest
-
-from agent.config import AgentConfig, INTELLIGENCE_LEVELS, intelligence_values, load_config
+from agent.config import (
+    AgentConfig,
+    intelligence_values,
+    load_config,
+)
 from agent.tui import (
-    HELLO_TEXT,
     HELLO_LEN,
     INTEL_CHOICES,
     INTEL_DISPLAY_ORDER,
     MODE_COLOR_IDX,
-    PINK_BG_IDX,
     TuiApp,
     build_picker_items,
     calc_chatbox_geometry,
     detect_theme,
     format_model_footer,
     get_layout_tier,
-    is_minimised,
     is_too_small,
     next_mode,
     parse_slash_command,
     theme_colors,
-    validate_intel,
 )
-
 
 # ---------------------------------------------------------------------------
 # Tier system (spec 5-10)

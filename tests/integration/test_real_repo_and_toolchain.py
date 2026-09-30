@@ -24,8 +24,8 @@ from agent.project import ProjectStore, scan
 from agent.tasks import (
     COMPLETED,
     FAILED,
-    READY,
     PENDING,
+    READY,
     RUNNING,
     Task,
     TaskGraph,
@@ -33,7 +33,6 @@ from agent.tasks import (
 )
 from agent.toolchain import detect_toolchain, toolchain_to_text
 from agent.workspace import Workspace
-
 
 # ── helpers ────────────────────────────────────────────────────────────────
 

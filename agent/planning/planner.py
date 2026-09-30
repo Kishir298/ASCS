@@ -19,7 +19,8 @@ tests inject fakes so no Ollama server is required.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from agent.context.project import ProjectStore
 from agent.execution.tasks import TaskGraph, build_graph_from_specs, chunk_graph

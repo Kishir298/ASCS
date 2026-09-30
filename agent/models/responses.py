@@ -84,7 +84,7 @@ def parse_model_reply(text: str) -> ModelReply:
         return ModelReply(
             error="Expected a JSON object like "
             '{"tool": "<name>", "arguments": {...}} or {"done": true, "summary": "..."}. '
-            f"Could not parse a JSON object from the response.",
+            "Could not parse a JSON object from the response.",
             raw=raw,
         )
 
@@ -147,7 +147,7 @@ class Plan:
         self.goal = goal
 
     @classmethod
-    def from_value(cls, value: Any) -> "Plan":
+    def from_value(cls, value: Any) -> Plan:
         """Build a Plan from a relaxed JSON value; never raises."""
         goal = ""
         raw_steps: list[str] = []
@@ -189,7 +189,7 @@ class Plan:
         return {"goal": self.goal, "steps": self.steps}
 
 
-def tool_result_message(tool_result: "ToolResult") -> dict[str, str]:
+def tool_result_message(tool_result: ToolResult) -> dict[str, str]:
     """Format a ToolResult as a chat message for the model.
 
     Tool results are sent with the ``user`` role for maximum compatibility
@@ -234,8 +234,8 @@ class ToolResult:
 
 
 __all__ = [
-    "Plan",
     "ModelReply",
+    "Plan",
     "ToolResult",
     "parse_model_reply",
     "tool_result_message",

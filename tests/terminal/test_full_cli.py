@@ -23,7 +23,6 @@ import pytest
 
 from agent.config import (
     INTELLIGENCE_LEVELS,
-    INTELLIGENCE_MAP,
     PROVIDER_NAMES,
     AgentConfig,
     intelligence_values,
@@ -34,9 +33,10 @@ from agent.config import (
 from agent.main import build_parser, main
 from agent.providers import (
     PROVIDER_NAMES as P_NAMES,
+)
+from agent.providers import (
     get_ollama_compat_models,
     is_ollama_available,
-    list_all_providers_with_models,
     list_models_for_provider,
 )
 from agent.tui import (
@@ -216,7 +216,8 @@ def test_intelligence_levels_both_window_and_retrieval():
     # default alias should equal high's window (65k bump for 30b)
     assert intelligence_values("default") == intelligence_values("high") or intelligence_values("default")[0] == 65536
     # config integration: intelligence sets both
-    import tempfile, pathlib
+    import pathlib
+    import tempfile
 
     tmp = pathlib.Path(tempfile.gettempdir()) / "tmp_tui_intel_ws"
     tmp.mkdir(exist_ok=True)
@@ -308,7 +309,6 @@ def test_slash_commands_parse():
 
 def test_ollama_compatible_guarantee():
     # Even if cloud providers fail, Ollama is fallback and app never crashes
-    from agent.providers import get_ollama_compat_models, is_ollama_available
 
     # get_ollama_compat_models for unknown provider should fallback to ollama list (empty offline but not error)
     models, is_fallback = get_ollama_compat_models("openai", timeout=1)

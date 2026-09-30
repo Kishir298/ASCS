@@ -9,14 +9,13 @@ import pytest
 
 from agent.context import ContextError
 from agent.project import (
-    MANIFEST_FILE,
     ProjectManifest,
     ProjectScanner,
     ProjectStore,
+    ScanResult,
     open_project,
     scan,
 )
-from agent.project import ScanResult
 
 
 def write_file(root: Path, relative: str, content: str) -> Path:
@@ -188,7 +187,7 @@ def test_store_persists_and_loads_task_graph(sample_project):
     store.refresh(force=True)
 
     from agent.models import Plan
-    from agent.tasks import TaskGraph, plan_to_graph
+    from agent.tasks import plan_to_graph
 
     graph = plan_to_graph(Plan(["step one", "step two"]))
     graph.mark("task-1", "completed")

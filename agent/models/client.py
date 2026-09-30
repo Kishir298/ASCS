@@ -20,7 +20,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from agent.config import (
     DEFAULT_MODEL,
@@ -150,7 +151,7 @@ def resilient_chat(client, messages: list[dict[str, str]], **kwargs: Any) -> str
     chat_resilient = getattr(client, "chat_resilient", None)
     if chat_resilient is not None:
         return chat_resilient(messages, **kwargs)
-    chat = getattr(client, "chat")
+    chat = client.chat
     kwargs.pop("should_stop", None)
     return chat(messages, **kwargs)
 

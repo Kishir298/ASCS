@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import sys
 
-import pytest
-
 from agent.boot import boot, boot_error_message, print_boot
 from agent.ollama import OllamaError
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from agent.config import AgentConfig
 from agent.planning.prompts import (
     _environment_text,

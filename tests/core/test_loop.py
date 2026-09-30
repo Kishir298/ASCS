@@ -8,8 +8,6 @@ from __future__ import annotations
 import json
 import sys
 
-import pytest
-
 from agent.config import AgentConfig
 from agent.loop import AgentLoop, run_agent
 from agent.ollama import (

@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from agent.models import Plan, ToolResult, parse_model_reply, tool_result_message, truncate
+from agent.models import (
+    Plan,
+    ToolResult,
+    parse_model_reply,
+    tool_result_message,
+    truncate,
+)
 
 
 def test_parse_tool_call():

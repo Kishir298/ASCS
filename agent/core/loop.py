@@ -33,12 +33,31 @@ from __future__ import annotations
 import json as _json
 import re
 import time as _time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from datetime import UTC
+from typing import Any
 
 from agent import state as _state
-from agent.config import AgentConfig, MODIFY_TOOLS
-from agent.execution.executor import TaskExecutor, TaskExecution
+from agent.config import MODIFY_TOOLS, AgentConfig
+from agent.core.intent import (
+    CONVERSATION as _CONVERSATION,
+)
+from agent.core.intent import (
+    MUTATING_TOOLS as _MUTATING_TOOLS,
+)
+from agent.core.intent import (
+    QUESTION as _QUESTION,
+)
+from agent.core.intent import (
+    WRITE_EXCLUDED_INTENTS as _WRITE_EXCLUDED_INTENTS,
+)
+from agent.core.intent import (
+    Decision,
+    classify_request,
+    fallback_spec_for,
+)
+from agent.core.state import StateTracker
 from agent.events import (
     EventSink,
     emit_activity,
@@ -64,8 +83,10 @@ from agent.events import (
     emit_tool_started,
     null_sink,
 )
-from agent.models import Plan, ToolResult, parse_model_reply, tool_result_message
+from agent.execution.executor import TaskExecution, TaskExecutor
+from agent.execution.tasks import Task
 from agent.experience import ExperienceStore, format_for_prompt
+from agent.models import Plan, ToolResult, parse_model_reply, tool_result_message
 from agent.ollama import (
     OllamaClient,
     OllamaConnectionError,
@@ -75,24 +96,13 @@ from agent.ollama import (
     OllamaTimeoutError,
     resilient_chat,
 )
-from agent.planning.planner import plan_objective, plan_text
+from agent.planning.planner import plan_text
 from agent.planning.prompts import (
     malformed_feedback,
     system_prompt,
     task_message,
     tool_error_feedback,
 )
-from agent.core.intent import (
-    CONVERSATION as _CONVERSATION,
-    MUTATING_TOOLS as _MUTATING_TOOLS,
-    QUESTION as _QUESTION,
-    WRITE_EXCLUDED_INTENTS as _WRITE_EXCLUDED_INTENTS,
-    Decision,
-    classify_request,
-    fallback_spec_for,
-)
-from agent.core.state import StateTracker
-from agent.execution.tasks import Task
 from agent.tools import execute_tool
 from agent.workspace import Workspace
 
@@ -1282,8 +1292,7 @@ class AgentLoop:
         - workspace: workspace path
         - timestamp: ISO format timestamp
         """
-        import json
-        from datetime import datetime, timezone
+        from datetime import datetime
         
         # Get context index reference
         context_index_ref = str(self.ws.root / ".ascs" / "context_index.json")
@@ -1321,7 +1330,7 @@ class AgentLoop:
             "context_index_ref": context_index_ref,
             "experience_tags": list(set(experience_tags)),  # deduplicate
             "workspace": str(self.ws.root),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 

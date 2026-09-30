@@ -16,10 +16,9 @@ import re
 import threading
 import time
 import uuid
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable
-
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 
@@ -58,7 +57,7 @@ class Experience:
         return asdict(self)
 
     @classmethod
-    def from_record(cls, record: dict) -> "Experience":
+    def from_record(cls, record: dict) -> Experience:
         """Construct an experience from persisted JSON data."""
         if not isinstance(record, dict):
             raise ValueError("experience record must be an object")

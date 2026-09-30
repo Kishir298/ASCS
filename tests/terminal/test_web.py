@@ -11,7 +11,7 @@ import pytest
 
 from agent.config import AgentConfig
 from agent.events import AgentEvent
-from agent.web import App, EventHub, TaskRunner, interrupt_thread
+from agent.web import App, EventHub, interrupt_thread
 from agent.workspace import Workspace
 
 

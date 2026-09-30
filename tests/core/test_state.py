@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agent.state import (
+    ACTIVE_STATES,
     CANCELLED,
     COMPLETE,
     EXECUTING,
@@ -12,14 +13,12 @@ from agent.state import (
     IDLE,
     PLANNING,
     RECEIVING_TASK,
+    STATE_LABELS,
+    TERMINAL_STATES,
     TIMEOUT,
     VERIFYING,
-    STATE_LABELS,
-    StateSnapshot,
     StateTracker,
     is_valid_state,
-    TERMINAL_STATES,
-    ACTIVE_STATES,
 )
 
 

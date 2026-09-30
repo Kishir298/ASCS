@@ -10,8 +10,8 @@ from __future__ import annotations
 import platform
 import sys
 import time as _time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 from . import __version__
 from .config import AgentConfig, load_config

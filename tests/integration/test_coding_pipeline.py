@@ -9,36 +9,26 @@ from __future__ import annotations
 
 import json
 import subprocess
-import time
-from pathlib import Path
-
-import pytest
 
 from agent.config import AgentConfig
-from agent.events import EVENT_TYPES, emit_task_failed, emit_task_verified
 from agent.executor import (
-    TaskActionLog,
     TaskExecutor,
-    TaskExecution,
     TaskOutcome,
     VerificationResult,
 )
-from agent.loop import AgentLoop, GraphLoopResult
+from agent.loop import AgentLoop
 from agent.project import ProjectStore
 from agent.tasks import (
     COMPLETED,
     FAILED,
-    PENDING,
     READY,
     RUNNING,
-    CANCELLED,
     Task,
     TaskGraph,
     build_graph_from_specs,
     chunk_graph,
 )
 from agent.workspace import Workspace
-
 
 # ── helpers ────────────────────────────────────────────────────────────────
 

@@ -4,19 +4,17 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from agent.config import AgentConfig
 from agent.executor import (
-    TaskExecutor,
     TaskExecution,
+    TaskExecutor,
     TaskOutcome,
     VerificationResult,
     task_system_prompt,
     task_user_prompt,
 )
 from agent.project import ProjectStore
-from agent.tasks import COMPLETED, CANCELLED, FAILED, Task, build_graph_from_specs
+from agent.tasks import CANCELLED, COMPLETED, FAILED, Task, build_graph_from_specs
 from agent.workspace import Workspace
 
 

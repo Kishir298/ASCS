@@ -6,7 +6,6 @@ import json
 
 from agent.config import AgentConfig
 from agent.state import COMPLETE, EXECUTING, PLANNING
-
 from tests.core.test_loop import make_loop, tool_call
 
 

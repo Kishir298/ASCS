@@ -21,15 +21,18 @@ Design rules (from the master plan):
 
 from __future__ import annotations
 
-import hashlib
 import json
 import time
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable
 
-from agent.context.index import (DEFAULT_IGNORED_DIRS, DEFAULT_INDEX_FILE, DEFAULT_STATE_DIR,
-                      ContextError, ProjectIndex)
+from agent.context.index import (
+    DEFAULT_IGNORED_DIRS,
+    DEFAULT_STATE_DIR,
+    ContextError,
+    ProjectIndex,
+)
 from agent.execution.tasks import TaskGraph, TaskGraphError
 
 MANIFEST_FILE = "project_manifest.json"
@@ -169,7 +172,7 @@ class ProjectManifest:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, payload: dict) -> "ProjectManifest":
+    def from_dict(cls, payload: dict) -> ProjectManifest:
         known = set(cls.__dataclass_fields__)
         return cls(**{k: v for k, v in payload.items() if k in known})
 

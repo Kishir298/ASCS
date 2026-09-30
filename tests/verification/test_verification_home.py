@@ -9,7 +9,7 @@ No verification behavior is created or changed here.
 
 from __future__ import annotations
 
-import agent.verification as verification
+from agent import verification
 
 
 def test_verification_package_reexports_executor_types():

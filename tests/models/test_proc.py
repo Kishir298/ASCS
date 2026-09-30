@@ -19,7 +19,6 @@ class _Recorder:
         self.calls.append(list(argv))
         if argv[0] in self.fail_on:
             raise OSError(f"no {argv[0]}")
-        return None
 
 
 def test_stop_unloads_model_then_kills_server(tmp_path):

@@ -12,7 +12,6 @@ from agent.tasks import (
     FAILED,
     PENDING,
     READY,
-    RUNNING,
     SKIPPED,
     VALID_STATUSES,
     Task,

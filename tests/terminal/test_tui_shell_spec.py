@@ -16,7 +16,6 @@ import pytest
 from agent.config import AgentConfig
 from agent.tui import (
     COMFORTABLE_TIER,
-    HELLO_LEN,
     MIN_CHATBOX_W,
     SLASH_COMMANDS,
     TuiApp,
@@ -30,7 +29,6 @@ from agent.tui import (
     slash_menu_text,
     validate_connect_inputs,
 )
-
 
 # -- scoped picker ------------------------------------------------------------
 

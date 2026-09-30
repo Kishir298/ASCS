@@ -21,9 +21,7 @@ import pytest
 
 from agent.config import (
     INTELLIGENCE_LEVELS,
-    INTELLIGENCE_MAP,
     PROVIDER_NAMES,
-    AgentConfig,
     intelligence_values,
     load_config,
     load_tui_state,
@@ -31,15 +29,15 @@ from agent.config import (
 )
 from agent.providers import (
     PROVIDER_NAMES as P_NAMES,
+)
+from agent.providers import (
     list_models_for_provider,
-    list_all_providers_with_models,
 )
 from agent.tui import (
-    HELLO_TEXT,
     HELLO_LEN,
+    HELLO_TEXT,
     MODE_ORDER,
     PINK_BG_IDX,
-    build_picker_items as tui_build_picker_items,
     calc_chatbox_geometry,
     detect_theme,
     format_model_footer,
@@ -48,6 +46,9 @@ from agent.tui import (
     parse_slash_command,
     theme_colors,
     validate_intel,
+)
+from agent.tui import (
+    build_picker_items as tui_build_picker_items,
 )
 
 
@@ -144,7 +145,6 @@ def test_intelligence_levels_both_window_and_retrieval():
     # default alias should equal high's window (65k bump for 30b)
     assert intelligence_values("default") == intelligence_values("high") or intelligence_values("default")[0] == 65536
     # config integration: intelligence sets both
-    import tempfile, pathlib
     tmp = pathlib.Path(tempfile.gettempdir()) / "tmp_tui_intel_ws"
     tmp.mkdir(exist_ok=True)
     c_low = load_config(workspace=str(tmp), intelligence="low")

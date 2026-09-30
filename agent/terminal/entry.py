@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import sys
 
-from agent.config import load_config
 from agent.main import (
     _cmd_check,
     _cmd_doctor,
@@ -18,7 +17,6 @@ from agent.main import (
     build_parser,
 )
 from agent.models.client import OllamaClient
-
 
 ASCII_BANNER = r"""
     █████╗ ███████╗ ██████╗███████╗
@@ -61,10 +59,7 @@ def normalize_argv(argv: list[str] | None) -> list[str]:
     if has_ui:
         has_tui = True
 
-    if not has_diagnostic and not has_tui:
-        normalized.append("--tui")
-
-    elif has_tui and "--tui" not in normalized:
+    if not has_diagnostic and not has_tui or has_tui and "--tui" not in normalized:
         normalized.append("--tui")
 
     return normalized

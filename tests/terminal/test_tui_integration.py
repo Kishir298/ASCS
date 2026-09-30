@@ -9,15 +9,10 @@ Covers:
 
 from __future__ import annotations
 
-import pathlib
-import tempfile
-
-import pytest
-
-from agent.config import AgentConfig, DEFAULT_MODEL, intelligence_values, load_config
+from agent.config import DEFAULT_MODEL, AgentConfig, intelligence_values
 from agent.tui import (
-    HELLO_TEXT,
     HELLO_LEN,
+    HELLO_TEXT,
     MODE_ORDER,
     PINK_BG_IDX,
     TuiApp,
@@ -33,7 +28,6 @@ from agent.tui import (
     theme_colors,
     validate_intel,
 )
-
 
 # -- UI state ---------------------------------------------------------------
 
@@ -433,7 +427,6 @@ def test_build_picker_uses_real_provider_order():
 
 def test_models_picker_mocked(tmp_path, monkeypatch):
     # Mock provider fetch to avoid network
-    import agent.tui as tui_mod
     called = {}
 
     def fake_list_all(timeout=2, use_cache=True):
