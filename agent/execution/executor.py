@@ -21,6 +21,7 @@ same tool contract as the main loop.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -560,20 +561,38 @@ class TaskExecutor:
             "write_file", "apply_patch", "delete_file", "move_file", "copy_file",
         ):
             return None
-        # Extract the target path from the tool arguments.
-        target_path = arguments.get("path") or arguments.get("destination") or ""
-        if not target_path or not isinstance(target_path, str):
-            return None
-        # Normalize: just the relative path as git reports it.
-        target_rel = target_path.replace("\\", "/").strip()
-        if target_rel in self.git_baseline:
-            return ToolResult(
-                tool,
-                f"Protected: '{target_rel}' has pre-existing uncommitted changes. "
-                "ASCS will not overwrite existing user work. Proceed with a "
-                "different file or complete the current changes manually.",
-                ok=False,
-            )
+        # Check all relevant path arguments (source, destination, etc.)
+        paths_to_check = []
+        for key in ("path", "destination"):
+            p = arguments.get(key)
+            if p and isinstance(p, str):
+                paths_to_check.append(p)
+        for target_path in paths_to_check:
+            # Normalize: resolve relative paths (./dirty.txt -> dirty.txt), use forward slashes
+            target_rel = target_path.replace("\\", "/").strip()
+            # Remove leading ./ or .\\
+            while target_rel.startswith("./") or target_rel.startswith(".\\"):
+                target_rel = target_rel[2:]
+            if target_rel in self.git_baseline:
+                return ToolResult(
+                    tool,
+                    f"Protected: '{target_rel}' has pre-existing uncommitted changes. "
+                    "ASCS will not overwrite existing user work. Proceed with a "
+                    "different file or complete the current changes manually.",
+                    ok=False,
+                )
+            # Case-insensitive check for Windows
+            if sys.platform == "win32":
+                target_lower = target_rel.lower()
+                for baseline_path in self.git_baseline:
+                    if baseline_path.lower() == target_lower:
+                        return ToolResult(
+                            tool,
+                            f"Protected: '{target_rel}' has pre-existing uncommitted changes. "
+                            "ASCS will not overwrite existing user work. Proceed with a "
+                            "different file or complete the current changes manually.",
+                            ok=False,
+                        )
         return None
 
     @staticmethod
@@ -737,7 +756,7 @@ class TaskExecutor:
         verification steps are treated as *not fully verified*.
         """
         result = VerificationResult(task_id=task.id)
-        steps: list[str] = []
+        steps: list[tuple[str, str]] = []
 
         for command in task.commands:
             steps.append(("run", command))
@@ -750,21 +769,28 @@ class TaskExecutor:
 
         # Phase 4.7 no-steps policy: implementing tasks must have actionable
         # verification or be treated as not fully verified.
-        if not steps:
-            _is_implementing = task.kind in ("implement", "")
+        _is_implementing = task.kind in ("implement", "")
+        # Check if there are any actionable (run) steps
+        has_run_steps = any(kind == "run" for kind, _ in steps)
+        if not has_run_steps:
             if _is_implementing:
                 result.steps.append({
-                    "step": "(no verification steps declared)",
+                    "step": "(no actionable verification steps declared)",
                     "status": "failed",
                     "ok": False,
-                    "output": "Implementing task has no verification steps; "
-                              "add verification commands or checks to confirm "
+                    "output": "Implementing task has no run commands for verification; "
+                              "add verification commands (e.g., 'run pytest') to confirm "
                               "the task is correct.",
                 })
                 result.ok = False
                 return result
-            # Non-implementing tasks (inspect/plan/review) pass with no steps.
+            # Non-implementing tasks (inspect/plan/review) pass with no actionable steps.
+            # But we still record the descriptive steps.
             result.ok = True
+            for kind, payload in steps:
+                result.steps.append(
+                    {"step": payload, "status": "noted", "ok": True, "output": ""}
+                )
             return result
 
         all_ok = True
@@ -782,6 +808,17 @@ class TaskExecutor:
                     "status": "blocked",
                     "ok": False,
                     "output": blocked.output,
+                })
+                all_ok = False
+                continue
+            # Intent gate: read-only intents must not run mutating commands in verification.
+            intent_block = self._check_intent_allowed("run_command")
+            if intent_block is not None:
+                result.steps.append({
+                    "step": payload,
+                    "status": "blocked",
+                    "ok": False,
+                    "output": intent_block.output,
                 })
                 all_ok = False
                 continue

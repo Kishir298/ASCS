@@ -16,6 +16,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -183,6 +184,8 @@ def _read_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
     start_line = _opt_int(args, "start_line", 0)
     end_line = _opt_int(args, "end_line", 0)
     note = ""
+    width = len(str(len(lines)))
+    
     if start_line or end_line:
         start = max(1, start_line)
         end = end_line if end_line else len(lines)
@@ -191,6 +194,8 @@ def _read_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
             return ToolResult("read_file", f"{path} has only {len(lines)} lines.")
         selected = lines[start - 1:end]
         note = f" (lines {start}-{end} of {len(lines)})"
+        # Number lines from the actual start line number
+        numbered = "\n".join(f"{start + i:>{width}}| {ln}" for i, ln in enumerate(selected))
     else:
         max_lines = 2000
         if len(lines) > max_lines:
@@ -198,9 +203,9 @@ def _read_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
             note = f" (first {max_lines} of {len(lines)} lines; use start_line/end_line to read more)"
         else:
             selected = lines
+        start = 1
+        numbered = "\n".join(f"{i+1:>{width}}| {ln}" for i, ln in enumerate(selected))
 
-    width = len(str(len(lines)))
-    numbered = "\n".join(f"{i+1:>{width}}| {ln}" for i, ln in enumerate(selected))
     enc_note = f" [decoded as {encoding}]" if encoding != "utf-8" else ""
     output = f"{path}{note}{enc_note}:\n{numbered}"
     return ToolResult("read_file", truncate_env(output, cfg.max_output_chars))
@@ -234,6 +239,19 @@ def _search_files(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
             if include and not fnmatch.fnmatch(name, include):
                 continue
             full = Path(dirpath) / name
+            
+            # Skip external symlinks - don't follow them
+            try:
+                if full.is_symlink():
+                    target = full.resolve()
+                    try:
+                        target.relative_to(ws.root)
+                    except ValueError:
+                        # Symlink points outside workspace - skip it
+                        continue
+            except (OSError, ValueError):
+                continue
+            
             total += 1
             try:
                 with full.open("r", encoding="utf-8", errors="replace") as fh:
@@ -297,9 +315,28 @@ def _write_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
     target.parent.mkdir(parents=True, exist_ok=True)
 
     data = content.encode("utf-8")
-    tmp = target.with_name(target.name + ".risa_tmp")
-    tmp.write_bytes(data)
-    os.replace(tmp, target)
+    # Use exclusive unpredictable temp file (no predictable prefix) to avoid symlink attacks
+    with tempfile.NamedTemporaryFile(
+        mode="wb", dir=target.parent, delete=False, suffix=".tmp"
+    ) as tmp:
+        tmp.write(data)
+        tmp_path = Path(tmp.name)
+    # Reject symlink traversal: ensure temp file is not a symlink
+    if tmp_path.is_symlink():
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise ToolValidationError(f"Temporary file path is a symlink, refusing to write: {path}")
+    try:
+        os.replace(tmp_path, target)
+    except Exception:
+        # Clean up temp file on failure
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
     return ToolResult(
         "write_file",
         f"Wrote {len(data)} bytes to {path}",
@@ -333,9 +370,27 @@ def _apply_patch(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
             ok=False,
         )
     updated = text.replace(old_text, new_text, 1)
-    tmp = target.with_name(target.name + ".risa_tmp")
-    tmp.write_bytes(updated.encode("utf-8"))
-    os.replace(tmp, target)
+    # Use exclusive unpredictable temp file (no predictable prefix) to avoid symlink attacks
+    with tempfile.NamedTemporaryFile(
+        mode="wb", dir=target.parent, delete=False, suffix=".tmp"
+    ) as tmp:
+        tmp.write(updated.encode("utf-8"))
+        tmp_path = Path(tmp.name)
+    # Reject symlink traversal: ensure temp file is not a symlink
+    if tmp_path.is_symlink():
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise ToolValidationError(f"Temporary file path is a symlink, refusing to patch: {path}")
+    try:
+        os.replace(tmp_path, target)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
     return ToolResult(
         "apply_patch",
         f"Applied patch to {path} (replaced 1 occurrence).",
@@ -344,13 +399,18 @@ def _apply_patch(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
 
 
 def _delete_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
+    import os
     path = _require(args, "path", str)
+    # Check if the literal path is a symlink (without following it)
+    literal_path = ws.root / path
+    is_symlink = os.path.islink(literal_path)
+    # Now resolve for containment checks
     target = ws.resolve(path)
     if target == ws.root:
         raise ToolValidationError("Refusing to delete the workspace root itself.")
-    if not target.exists() and not target.is_symlink():
+    if not target.exists() and not is_symlink:
         raise ToolValidationError(f"Path does not exist: {path}")
-    if target.is_dir() and not target.is_symlink():
+    if target.is_dir() and not is_symlink:
         raise ToolValidationError(
             f"Refusing to delete directory {path!r} with delete_file; "
             "remove directories via run_command (e.g. Remove-Item -Recurse) "
@@ -370,9 +430,9 @@ def _delete_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
             f"Refusing to delete {rel.name!r}; remove it via run_command if that "
             "is genuinely required."
         )
-    if target.is_symlink():
+    if is_symlink:
         from agent.workspace import _remove_link
-        _remove_link(target)
+        _remove_link(literal_path)
         return ToolResult(
             "delete_file", f"Removed link {path}", note="link deleted"
         )
@@ -381,8 +441,12 @@ def _delete_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
 
 
 def _move_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
+    import os
     path = _require(args, "path", str)
     destination = _require(args, "destination", str)
+    # Check if destination is a symlink BEFORE resolving
+    literal_dst = ws.root / destination
+    is_dst_symlink = os.path.islink(literal_dst)
     src = ws.resolve(path)
     dst = ws.resolve(destination)
     _reject_protected_path(_rel_or_raise(ws, src, path), path)
@@ -391,7 +455,15 @@ def _move_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
         raise ToolValidationError("Refusing to move the workspace root itself.")
     if not src.exists() and not src.is_symlink():
         raise ToolValidationError(f"Source does not exist: {path}")
-    if dst.exists():
+    # Handle symlink destination - unlink the symlink first, then move to the literal destination
+    if is_dst_symlink:
+        from agent.workspace import _remove_link
+        _remove_link(literal_dst)
+        # Move to the literal destination path (not the resolved target)
+        os.replace(src, literal_dst)
+        rel = literal_dst.relative_to(ws.root)
+        return ToolResult("move_file", f"Moved {path} to {rel}", note="file moved")
+    elif dst.exists():
         if not dst.is_dir():
             raise ToolValidationError(
                 f"Destination already exists and is not a directory: {destination}"
@@ -422,6 +494,12 @@ def _copy_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
         )
     if dst.is_dir():
         dst = dst / src.name
+        # Validate the expanded destination after basename append
+        _reject_protected_path(_rel_or_raise(ws, dst, str(dst.relative_to(ws.root))), str(dst.relative_to(ws.root)))
+        if dst.exists() or dst.is_symlink():
+            raise ToolValidationError(
+                f"Destination already exists: {dst.relative_to(ws.root)}"
+            )
     dst.parent.mkdir(parents=True, exist_ok=True)
     import shutil
     shutil.copyfile(src, dst)
@@ -922,6 +1000,44 @@ def execute_tool(
         return ToolResult(name, str(exc), ok=False)
     warnings = validated.pop("_warnings", None)
     spec = TOOL_SPECS[name]
+    
+    # Git-dirty guard: block writes to files that were dirty before ASCS started
+    if name in ("write_file", "apply_patch", "delete_file", "move_file", "copy_file"):
+        git_baseline = getattr(cfg, "git_baseline", frozenset())
+        if git_baseline:
+            # Check all relevant path arguments (source, destination, etc.)
+            paths_to_check = []
+            for key in ("path", "destination"):
+                p = validated.get(key)
+                if p and isinstance(p, str):
+                    paths_to_check.append(p)
+            for target_path in paths_to_check:
+                target_rel = target_path.replace("\\", "/").strip()
+                # Remove leading ./ or .\\
+                while target_rel.startswith("./") or target_rel.startswith(".\\"):
+                    target_rel = target_rel[2:]
+                # Windows case-insensitive comparison
+                if target_rel in git_baseline:
+                    return ToolResult(
+                        name,
+                        f"Protected: '{target_rel}' has pre-existing uncommitted changes. "
+                        "ASCS will not overwrite existing user work. Proceed with a "
+                        "different file or complete the current changes manually.",
+                        ok=False,
+                    )
+                # Case-insensitive check for Windows
+                if sys.platform == "win32":
+                    target_lower = target_rel.lower()
+                    for baseline_path in git_baseline:
+                        if baseline_path.lower() == target_lower:
+                            return ToolResult(
+                                name,
+                                f"Protected: '{target_rel}' has pre-existing uncommitted changes. "
+                                "ASCS will not overwrite existing user work. Proceed with a "
+                                "different file or complete the current changes manually.",
+                                ok=False,
+                            )
+    
     try:
         result = spec.handler(validated, ws, cfg)
     except ToolValidationError as exc:

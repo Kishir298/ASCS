@@ -377,7 +377,7 @@ def test_no_steps_fails_implementing_task(tmp_path):
     task = Task(id="T1", title="Build", kind="implement")
     verification = executor.verify(executor, task)
     assert not verification.ok
-    assert "no verification steps" in verification.detail
+    assert "actionable verification" in verification.detail
 
 
 def test_no_steps_passes_inspect_task(tmp_path):

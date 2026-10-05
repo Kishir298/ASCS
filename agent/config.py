@@ -155,6 +155,7 @@ class AgentConfig:
             "set_plan",
         )
     )
+    git_baseline: frozenset[str] = frozenset()  # paths with pre-existing uncommitted changes
 
     @property
     def is_safe_mode(self) -> bool:

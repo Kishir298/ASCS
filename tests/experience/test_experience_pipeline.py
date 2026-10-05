@@ -47,7 +47,7 @@ def _plan_single_task(task_title="Write hello"):
                     "id": "T1",
                     "title": task_title,
                     "kind": "implement",
-                    "verification": ["report inspection findings"],
+                    "verification": ["run echo verification passed"],
                 }
             ]
         }

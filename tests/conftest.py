@@ -5,10 +5,25 @@ Runs against a temporary workspace so tests never touch real projects.
 
 from __future__ import annotations
 
+import os
 import pytest
 
 from agent.config import AgentConfig
 from agent.workspace import Workspace
+
+
+# External validation markers — skipped unless RISALIVE=1
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "live: requires live Ollama model (RISALIVE=1)"
+    )
+
+def pytest_collection_modifyitems(config, items):
+    if os.environ.get("RISALIVE") != "1":
+        skip_live = pytest.mark.skip(reason="RISALIVE=1 not set")
+        for item in items:
+            if "live" in item.keywords:
+                item.add_marker(skip_live)
 
 
 @pytest.fixture

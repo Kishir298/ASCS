@@ -259,7 +259,7 @@ def test_verify_task_with_no_steps_fails_for_implementing(tmp_path):
     # implementing tasks require explicit verification steps.
     verification = executor.verify(executor, Task(id="T1", title="X"))
     assert not verification.ok
-    assert "no verification steps" in verification.detail
+    assert "actionable verification" in verification.detail
 
 
 # -- default model loop ----------------------------------------------------

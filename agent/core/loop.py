@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json as _json
 import re
+import sys
 import time as _time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -1192,18 +1193,37 @@ class AgentLoop:
         baseline = self._ensure_git_baseline()
         if not baseline:
             return None
-        target_path = arguments.get("path") or arguments.get("destination") or ""
-        if not target_path or not isinstance(target_path, str):
-            return None
-        target_rel = target_path.replace("\\", "/").strip()
-        if target_rel in baseline:
-            return ToolResult(
-                tool,
-                f"Protected: '{target_rel}' has pre-existing uncommitted changes. "
-                "ASCS will not overwrite existing user work. Proceed with a "
-                "different file or complete the current changes manually.",
-                ok=False,
-            )
+        # Check all relevant path arguments (source, destination, etc.)
+        paths_to_check = []
+        for key in ("path", "destination"):
+            p = arguments.get(key)
+            if p and isinstance(p, str):
+                paths_to_check.append(p)
+        for target_path in paths_to_check:
+            target_rel = target_path.replace("\\", "/").strip()
+            # Remove leading ./ or .\\
+            while target_rel.startswith("./") or target_rel.startswith(".\\"):
+                target_rel = target_rel[2:]
+            if target_rel in baseline:
+                return ToolResult(
+                    tool,
+                    f"Protected: '{target_rel}' has pre-existing uncommitted changes. "
+                    "ASCS will not overwrite existing user work. Proceed with a "
+                    "different file or complete the current changes manually.",
+                    ok=False,
+                )
+            # Case-insensitive check for Windows
+            if sys.platform == "win32":
+                target_lower = target_rel.lower()
+                for baseline_path in baseline:
+                    if baseline_path.lower() == target_lower:
+                        return ToolResult(
+                            tool,
+                            f"Protected: '{target_rel}' has pre-existing uncommitted changes. "
+                            "ASCS will not overwrite existing user work. Proceed with a "
+                            "different file or complete the current changes manually.",
+                            ok=False,
+                        )
         return None
 
     def _bump_malformed(self, iteration: int) -> bool:
