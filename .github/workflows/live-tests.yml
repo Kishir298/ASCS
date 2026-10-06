@@ -1,0 +1,24 @@
+name: Live Tests
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 0'  # Weekly Sunday 3 AM
+jobs:
+  live-tests:
+    if: ${{ secrets.RISALIVE == '1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run live Ollama tests
+        env:
+          RISALIVE: ${{ secrets.RISALIVE }}
+        run: |
+          pytest tests/integration/test_ollama_live.py -q -v
