@@ -6,6 +6,7 @@ Runs against a temporary workspace so tests never touch real projects.
 from __future__ import annotations
 
 import os
+
 import pytest
 
 from agent.config import AgentConfig

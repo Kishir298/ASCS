@@ -5,10 +5,6 @@ These tests reproduce the vulnerabilities described in the audit and verify fixe
 
 from __future__ import annotations
 
-import os
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from agent.tools import execute_tool
@@ -175,10 +171,7 @@ def test_ascs5_verification_commands_respect_intent(tmp_path, config):
     """
     # This test requires a TaskExecutor with project_inspection intent
     # We'll test at the executor level
-    from agent.execution.executor import TaskExecutor, VerificationResult
-    from agent.execution.tasks import Task, COMPLETED
-    from agent.config import AgentConfig
-    from agent.ollama import OllamaClient
+    from agent.execution.tasks import Task
     
     # Create a minimal mock setup
     class MockClient:
@@ -213,6 +206,7 @@ def test_ascs6_dirty_file_safeguards_aliases_and_destinations(tmp_path, config):
     Regression: ./dirty.txt vs dirty.txt missed; copy/move destination ignored.
     """
     import subprocess
+
     from agent.config import AgentConfig
     
     # Initialize git repo
@@ -266,9 +260,8 @@ def test_ascs7_verification_requires_actionable_checks(tmp_path, config):
     
     Regression: 'Ensure everything works' returned ok=True with only a noted step.
     """
-    from agent.execution.executor import TaskExecutor, VerificationResult
+    from agent.execution.executor import TaskExecutor
     from agent.execution.tasks import Task
-    from agent.config import AgentConfig
     
     class MockClient:
         pass

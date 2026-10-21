@@ -1,12 +1,12 @@
 """Tests for export_handover_state method."""
 
 import json
-import pytest
 
-from agent.core.loop import AgentLoop
 from agent.config import load_config
-from agent.workspace import Workspace
+from agent.core.loop import AgentLoop
 from agent.models.client import OllamaClient
+from agent.workspace import Workspace
+
 
 def make_loop(tmp_path):
     config = load_config(workspace=tmp_path)

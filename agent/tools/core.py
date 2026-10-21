@@ -641,7 +641,6 @@ def _python_fallback_command(command: str) -> str:
     return command[:prefix_len] + "python3" + rest
 
 
-import shlex
 
 
 def _execute_process(
