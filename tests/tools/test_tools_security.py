@@ -5,12 +5,21 @@ These tests reproduce the vulnerabilities described in the audit and verify fixe
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from agent.tools import execute_tool
 from agent.workspace import Workspace
 
+# Windows symlink tests require admin/Developer Mode privileges
+skip_win32_symlink = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="symlink requires admin/Developer Mode on Windows"
+)
 
+
+@skip_win32_symlink
 def test_ascs1_predictable_temp_file_no_external_overwrite(tmp_path, config):
     """ASCS-1: write_file/apply_patch must use exclusive unpredictable temp files.
     
@@ -41,6 +50,7 @@ def test_ascs1_predictable_temp_file_no_external_overwrite(tmp_path, config):
     assert target_file.read_text() == "new content"
 
 
+@skip_win32_symlink
 def test_ascs1_apply_patch_predictable_temp_no_external_overwrite(tmp_path, config):
     """ASCS-1: apply_patch must use exclusive unpredictable temp files."""
     ws = Workspace(tmp_path)
@@ -67,6 +77,7 @@ def test_ascs1_apply_patch_predictable_temp_no_external_overwrite(tmp_path, conf
     assert target_file.read_text() == "patched content"
 
 
+@skip_win32_symlink
 def test_ascs2_copy_destination_validated(tmp_path, config):
     """ASCS-2: Directory copy destination must be validated after basename expansion.
     
@@ -107,6 +118,7 @@ def test_ascs2_copy_destination_validated(tmp_path, config):
     assert source.read_text() == "source content"
 
 
+@skip_win32_symlink
 def test_ascs3_search_files_no_external_symlink_follow(tmp_path, config):
     """ASCS-3: search_files must not follow workspace symlinks to external files.
     
@@ -138,6 +150,7 @@ def test_ascs3_search_files_no_external_symlink_follow(tmp_path, config):
         "Search followed symlink to external file!"
 
 
+@skip_win32_symlink
 def test_ascs4_delete_file_unlinks_not_target(tmp_path, config):
     """ASCS-4: delete_file must unlink the symlink, not delete its target.
     
@@ -324,6 +337,7 @@ def test_ascs8_ranged_read_correct_line_numbers(tmp_path, config):
 
 
 # Additional test for move_file with symlink destination
+@skip_win32_symlink
 def test_move_file_symlink_destination(tmp_path, config):
     """Test move_file handles symlink destinations correctly."""
     ws = Workspace(tmp_path)
@@ -348,9 +362,11 @@ def test_move_file_symlink_destination(tmp_path, config):
 
 
 # Test for Windows case sensitivity (part of ASCS-6)
-def test_dirty_file_windows_case_insensitive(tmp_path, config):
+def test_dirty_file_windows_case_insensitive(tmp_path):
     """Test dirty file detection handles Windows case-insensitive paths."""
     import subprocess
+
+    from agent.config import AgentConfig
     
     subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
     subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
@@ -362,14 +378,20 @@ def test_dirty_file_windows_case_insensitive(tmp_path, config):
     subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, capture_output=True)
     dirty_file.write_text("modified")
     
+    # Create config with git_baseline set to the committed file (Dirty.txt)
+    config = AgentConfig(
+        workspace=tmp_path,
+        mode="AUTO",
+        git_baseline=frozenset({"Dirty.txt"})
+    )
+    
     ws = Workspace(tmp_path)
     
-    # Try writing with different case
+    # Try writing with different case (lowercase)
     result = execute_tool("write_file", {"path": "dirty.txt", "content": "new"}, ws, config)
     # On Windows this should be blocked; on Unix it may not be
     # The fix should normalize for case-insensitive comparison on Windows
-    import platform
-    if platform.system() == "Windows":
+    if sys.platform == "win32":
         assert not result.ok, "Should block write to dirty.txt (case variant of Dirty.txt)"
 
 
