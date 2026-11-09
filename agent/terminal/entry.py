@@ -67,6 +67,11 @@ def normalize_argv(argv: list[str] | None) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     """Start A.S.C.S. as a terminal-native application."""
+    from agent import pi
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if pi.enabled() or "--pi" in raw or "--pi-status" in raw:
+        from agent.main import main as task_main
+        return task_main(raw)
     normalized = normalize_argv(argv)
     args = build_parser().parse_args(normalized)
 

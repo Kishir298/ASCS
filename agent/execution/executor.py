@@ -258,6 +258,9 @@ class TaskExecutor:
         git_baseline: set[str] | None = None,
         intent: Any | None = None,
     ) -> None:
+        from agent.pi import enabled
+        if enabled():
+            raise RuntimeError("Pi agent tools disabled: use generation-only CLI until an OS sandbox is validated")
         self.config = config
         self.client = client
         self.ws = workspace

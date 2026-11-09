@@ -2,4 +2,4 @@
 
 from __future__ import annotations
 
-from agent.context.toolchain import *
+from agent.context.toolchain import *  # noqa: F403 - legacy compatibility re-export

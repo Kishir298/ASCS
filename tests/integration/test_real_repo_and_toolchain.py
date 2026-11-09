@@ -458,7 +458,7 @@ def test_dirty_baseline_file_untouched_in_real_repo(tmp_path):
 
     loop = _make_loop(tmp_path, responses)
     loop.approver = lambda _d: True
-    result = loop.run_graph("update readme")
+    _result = loop.run_graph("update readme")
     # The dirty readme must NOT be overwritten.
     content = (tmp_path / "README.md").read_text(encoding="utf-8")
     assert "MY USER EDITS" in content

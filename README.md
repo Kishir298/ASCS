@@ -1,3 +1,7 @@
+# Raspberry Pi document update 6 November 2026
+
+See [ASCS Pi handoff](docs/ASCS-Pi-Update-2026-11-06.md). The new installed `ascs` command supports experimental Pi generation-only mode with resource admission. No Pi tool execution or hardware performance is certified.
+
 # A.S.C.S. — A Smart Coding System
 
 A local, private, autonomous coding agent built on **Ollama**. It plans,

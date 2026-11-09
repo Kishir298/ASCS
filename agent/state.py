@@ -6,7 +6,7 @@ after the Phase 0 move. New code should import from ``agent.core``.
 
 from __future__ import annotations
 
-from agent.core.state import *
+from agent.core.state import *  # noqa: F403 - legacy compatibility re-export
 from agent.core.state import (
     ACTIVE_STATES,
     ALL_STATES,

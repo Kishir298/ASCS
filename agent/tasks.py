@@ -2,4 +2,4 @@
 
 from __future__ import annotations
 
-from agent.execution.tasks import *
+from agent.execution.tasks import *  # noqa: F403 - legacy compatibility re-export

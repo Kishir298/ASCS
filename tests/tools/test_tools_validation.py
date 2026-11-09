@@ -34,7 +34,7 @@ def test_missing_required_arg():
 
 
 def test_extra_arguments_are_warned_not_fatal(tmp_path, config):
-    cfg = config
+    _cfg = config
     # validate_tool_call returns _warnings for unknown args
     checked = validate_tool_call("git_status", {"bogus": 1})
     assert "_warnings" in checked

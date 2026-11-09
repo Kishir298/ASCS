@@ -310,13 +310,13 @@ def test_fan_in_fan_out_correct_order(tmp_path):
 
 def test_tool_execution_captures_output_and_exit_code(tmp_path):
     """run_command output is captured and returned."""
-    client = FakeClient([
+    _client = FakeClient([
         _tool("run_command", {"command": "python -c \"print('hello world')\""}),
         _done("executed"),
     ])
     config = AgentConfig(workspace=tmp_path, mode="AUTO")
     ws = Workspace(tmp_path)
-    executor = TaskExecutor(
+    _executor = TaskExecutor(
         config=config, client=None, workspace=ws, log=lambda m: None,
     )
     from agent.tools import execute_tool

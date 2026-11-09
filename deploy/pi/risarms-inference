@@ -1,0 +1,4 @@
+#!/bin/sh
+# ASIS and other cooperating model callers must use this same queue.
+# ASCS --pi acquires it internally; do not wrap ASCS twice.
+exec flock -w 30 -E 75 /run/risarms-inference/queue.lock "$@"

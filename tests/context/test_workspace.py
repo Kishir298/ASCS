@@ -105,7 +105,7 @@ def test_iter_files_skips_ignored(tmp_path):
     (tmp_path / ".venv" / "skip.py").write_text("skip")
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "b.txt").write_text("b")
-    ws = Workspace(tmp_path)
+    _ws = Workspace(tmp_path)
     names = sorted(p.name for p in Workspace.iter_files(tmp_path))
     assert names == ["a.py", "b.txt"]
 

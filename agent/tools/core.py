@@ -513,7 +513,7 @@ def _copy_file(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
 
 def _set_plan(args: dict[str, Any], ws: Workspace, cfg: Any) -> ToolResult:
     value = _opt_any(args, "plan")
-    goal = _opt_str(args, "goal", "")
+    _goal = _opt_str(args, "goal", "")
     plan = Plan.from_value(value)
     return ToolResult(
         "set_plan",
@@ -693,7 +693,7 @@ def _execute_process(
         proc = subprocess.Popen(args, **kwargs)
     start = time.monotonic()
     timed_out = False
-    killed = False
+    _killed = False
     try:
         while True:
             try:
@@ -706,7 +706,7 @@ def _execute_process(
                     stdout, stderr = proc.communicate()
                     break
     except KeyboardInterrupt:
-        killed = True
+        _killed = True
         _terminate_tree(proc)
         try:
             proc.communicate()

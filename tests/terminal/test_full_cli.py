@@ -589,7 +589,7 @@ def test_slash_intel_without_args_shows_picker_path(tmp_path, monkeypatch):
     ws = tmp_path / "ws"
     ws.mkdir()
     monkeypatch.setenv("AGENT_TUI_STATE_PATH", str(tmp_path / "s.json"))
-    app = TuiApp(AgentConfig(workspace=ws, intelligence="high"))
+    _app = TuiApp(AgentConfig(workspace=ws, intelligence="high"))
     # simulate fallback slash handling without curses: should give usage?
     # TuiApp._handle_slash needs stdscr; in fallback we test parse only
     assert parse_slash_command("/intel") == ("intel", [])
@@ -600,7 +600,7 @@ def test_slash_help_includes_required():
     # help string in code includes these
     ws = pathlib.Path(tempfile.gettempdir()) / "tmp_help_ws"
     ws.mkdir(exist_ok=True)
-    app = TuiApp(AgentConfig(workspace=ws))
+    _app = TuiApp(AgentConfig(workspace=ws))
     # we test that help handling sets status_msg correctly via direct call with mocked stdscr
     class Dummy:
         pass

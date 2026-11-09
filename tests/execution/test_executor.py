@@ -101,7 +101,7 @@ def test_exposes_failed_tasks_helper(tmp_path):
 
 
 def test_task_failure_marks_partial_and_cancels_dependents(tmp_path):
-    calls = {}
+    _calls = {}
 
     def started(executor, task):
         if task.id == "T2":

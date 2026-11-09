@@ -2,4 +2,4 @@
 
 from __future__ import annotations
 
-from agent.terminal.tui import *
+from agent.terminal.tui import *  # noqa: F403 - legacy compatibility re-export

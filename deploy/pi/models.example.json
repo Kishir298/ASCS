@@ -1,0 +1,9 @@
+{
+  "REPLACE_WITH_EXACT_INSTALLED_INSTRUCT_Q4_TAG": {
+    "digest": "REPLACE_WITH_VERIFIED_64_HEX_DIGEST",
+    "quantization": "Q4_K_M",
+    "peak_gib": 2.5,
+    "contexts": [2048],
+    "generation_verified": false
+  }
+}

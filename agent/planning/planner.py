@@ -174,7 +174,7 @@ def _derive_verification(task: dict, project_manifest_text: str) -> list[str]:
         return list(task["verification"])
 
     verification: list[str] = []
-    title_desc = (task.get("title", "") + " " + task.get("description", "")).lower()
+    _title_desc = (task.get("title", "") + " " + task.get("description", "")).lower()
     has_code = bool(task.get("files")) or task.get("kind") in ("implement", "review")
 
     if has_code:

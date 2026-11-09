@@ -68,3 +68,12 @@ tls/
 *.pem
 *.key
 *.crt
+
+# Pi release artifacts
+wheel/
+wheelhouse*/
+evidence/
+*.whl
+validation/*.log
+validation/*.xml
+validation/*.txt
