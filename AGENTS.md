@@ -21,8 +21,8 @@ opt-in step. Max-chunking splits 300k-token objectives into ~8k shards within th
 
 - Experimental Linux ARM64 Pi path: generation only, with admission policy and no full agent tools. See docs/ASCS-Pi-Update-2026-11-06.md. Validate hardware separately.
 
-- **Runtime (risa --ui/--tui, Ollama): Windows-only** (32 GB target). `risa --doctor` warns on non-Windows.
-- **Dev testing (pytest): cross-platform.** `agent/tools/core.py:534` transparently maps `python` -> `python3` on POSIX where only `python3` exists, so the suite passes on macOS/Linux too (use `.venv/bin/python -m pytest` or plain `python3 -m pytest`).
+- **Runtime (ascs/risa, Ollama): Windows and POSIX.** Windows is the primary validated target (32 GB recommended); macOS/Linux run the same runtime with the shell set to `/bin/sh` instead of cmd.exe. The TUI needs a curses-capable terminal (`windows-curses` on Windows, stdlib `curses` elsewhere).
+- **Dev testing (pytest): cross-platform.** `agent/tools/core.py` transparently maps `python` -> `python3` on POSIX where only `python3` exists, so the suite passes on macOS/Linux too (use `.venv/bin/python -m pytest` or plain `python3 -m pytest`).
 
 ## Test commands
 

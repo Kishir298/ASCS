@@ -282,12 +282,13 @@ def _check_git(cfg: AgentConfig) -> CheckResult:
 
 
 def _check_runtime_platform() -> CheckResult:
-    """Runtime is Windows-only; dev testing is cross-platform.
+    """Runtime is supported on Windows and on POSIX hosts.
 
-    The agent's shell workflow (cmd.exe, ``python``/``pip`` on PATH) is
-    Windows-first. Dev testing via ``pytest`` is intentionally cross-platform
-    (``tools._python_fallback_command`` handles ``python`` -> ``python3``),
-    but the full runtime (Ollama + risa TUI/Web) is only supported on Windows.
+    Commands run through cmd.exe on Windows and through the user's shell
+    (``/bin/sh`` by default) on macOS/Linux, so compound commands behave the
+    same on both. ``tools._python_fallback_command`` maps ``python`` ->
+    ``python3`` where only the latter is on PATH. Windows is the primary
+    validated target; the TUI needs a curses-capable terminal.
     """
     import os as _os
 
@@ -295,10 +296,10 @@ def _check_runtime_platform() -> CheckResult:
         return CheckResult("platform", PASS, "Windows runtime (supported)")
     return CheckResult(
         "platform",
-        WARN,
-        "Non-Windows host — dev testing (pytest) is cross-platform, but the "
-        "full ASCS runtime (Ollama/TUI/Web) is Windows-only. "
-        "Tool execution falls back ``python`` -> ``python3`` for dev.",
+        PASS,
+        f"POSIX runtime ({sys.platform}); commands run through the shell and "
+        "``python`` falls back to ``python3``. The TUI needs a "
+        "curses-capable terminal. Windows is the primary validated target.",
     )
 
 

@@ -12,7 +12,6 @@ import json
 import os
 import platform
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -656,7 +655,7 @@ def _execute_process(
     is transparently rewritten from ``python`` to ``python3`` so dev testing
     works cross-platform; the Windows runtime contract is unchanged.
     """
-    # Dev cross-platform: rewrite ``python`` -> ``python3`` when needed before
+    # Cross-platform: rewrite ``python`` -> ``python3`` when needed before
     # PATH manipulation so the correct binary is found.
     command = _python_fallback_command(command)
     env = os.environ.copy()
@@ -688,9 +687,15 @@ def _execute_process(
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         proc = subprocess.Popen(command, **kwargs)
     else:
-        # POSIX: safe parsing with shlex, no shell
-        args = shlex.split(command)
-        proc = subprocess.Popen(args, **kwargs)
+        # POSIX: run through /bin/sh so compound commands (``a && b``, pipes,
+        # redirection) behave the same as they do through cmd.exe on Windows.
+        # The command is already gated by intent/approval gating, exactly as on
+        # Windows where ``shell=True`` is required.
+        proc = subprocess.Popen(
+            [os.environ.get("SHELL", "/bin/sh"), "-c", command],
+            start_new_session=True,
+            **kwargs,
+        )
     start = time.monotonic()
     timed_out = False
     _killed = False

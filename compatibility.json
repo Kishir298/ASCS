@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "project": "ASCS",
+  "display_name": "A.S.C.S. — A Smart Coding System",
+  "version": "0.3.0",
+  "release_channel": "stable",
+  "standalone": true,
+  "requires_core": false,
+  "supported_operating_systems": [
+    {
+      "os": "windows",
+      "architectures": ["x86_64", "arm64"],
+      "minimum_version": "10 22H2",
+      "notes": "windows-curses provides the terminal UI on Windows."
+    },
+    {
+      "os": "macos",
+      "architectures": ["x86_64", "arm64"],
+      "minimum_version": "12.0",
+      "notes": "Apple Silicon and Intel packages are built separately."
+    },
+    {
+      "os": "linux",
+      "architectures": ["x86_64", "arm64"],
+      "minimum_version": "glibc 2.28",
+      "notes": "ARM64 supported where binary dependencies permit."
+    }
+  ],
+  "runtime": {
+    "kind": "python",
+    "minimum_version": "3.12",
+    "console_scripts": ["ascs", "risa"],
+    "install_methods": ["pip", "pipx", "standalone-executable"]
+  },
+  "model_providers": ["ollama", "openai", "anthropic", "grok", "google", "deepseek"],
+  "core_integration": {
+    "optional": true,
+    "protocol_versions": ["0.3.0", "0.4.0"],
+    "credential_env": "ASCS_CORE_CREDENTIAL",
+    "enable_env": "ASCS_CORE_ENABLED",
+    "offline_fallback": true
+  },
+  "integrations": ["asis", "ollama", "openai-compatible"],
+  "build_metadata": {
+    "builder": "GitHub Actions",
+    "artifact_naming": "ASCS-{version}-{os}-{arch}-{format}",
+    "checksums": "SHA-256",
+    "sbom": "CycloneDX JSON"
+  }
+}
