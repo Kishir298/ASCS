@@ -1,6 +1,7 @@
 """Test harness: prohibit external DNS and socket connections before test imports."""
-import socket
 import ipaddress
+import socket
+
 _real_getaddrinfo = socket.getaddrinfo
 _real_connect = socket.socket.connect
 _real_connect_ex = socket.socket.connect_ex

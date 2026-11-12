@@ -1,17 +1,17 @@
 """Fail-closed Pi generation adapter. No agent tools or arbitrary code execution."""
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import asdict, dataclass
 import json
 import math
 import os
 import platform
-from pathlib import Path
 import re
 import sys
 import time
 import urllib.request
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 GIB = 1024 ** 3
 

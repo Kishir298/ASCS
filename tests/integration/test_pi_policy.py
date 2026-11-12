@@ -3,7 +3,9 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+
 import pytest
+
 from agent import pi
 
 linux_only=pytest.mark.skipif(sys.platform!='linux',reason='Pi inference lock requires fcntl')

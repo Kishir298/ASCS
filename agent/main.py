@@ -14,8 +14,8 @@ handle. ``--ui`` shows the full staged startup sequence, then serves the UI.
 from __future__ import annotations
 
 import argparse
-import sys
 import signal
+import sys
 import threading
 
 from . import __version__
