@@ -574,7 +574,7 @@ def test_status_and_model_footer_bounded(tmp_path, width):
     from agent.tui import chatbox_bottom_layout, format_model_footer
 
     model = "q" * 500
-    footer = format_model_footer(model, "high")
+    _footer = format_model_footer(model, "high")
     mode_str, clipped, fx = chatbox_bottom_layout(
         "AUTO", model, "high", width, width
     )

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+import signal
+import threading
 
 from . import __version__
 from .config import (
@@ -67,6 +69,9 @@ def build_parser() -> argparse.ArgumentParser:
         prog="risa",
         description="A.S.C.S. - A Smart Coding System (local Ollama backend).",
     )
+    parser.add_argument("--pi", action="store_true", help="Experimental Pi generation-only deployment; no coding tools.")
+    parser.add_argument("--pi-unload-previous", action="store_true", help="Explicitly unload approved previous models on the dedicated managed runtime before admission.")
+    parser.add_argument("--pi-status", action="store_true", help="Print Pi admission status as JSON without generating text.")
     parser.add_argument(
         "task",
         nargs="?",
@@ -268,6 +273,16 @@ def build_config(args: argparse.Namespace) -> AgentConfig:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    from . import pi
+    if args.pi or args.pi_status or pi.enabled():
+        old = None
+        if threading.current_thread() is threading.main_thread():
+            old = signal.signal(signal.SIGTERM, pi.cancelled)
+        try:
+            return pi.run(args)
+        finally:
+            if old is not None:
+                signal.signal(signal.SIGTERM, old)
 
     try:
         config = build_config(args)

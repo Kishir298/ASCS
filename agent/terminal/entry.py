@@ -8,6 +8,7 @@ the browser-based UI.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from agent.main import (
     _cmd_check,
@@ -17,6 +18,45 @@ from agent.main import (
     build_parser,
 )
 from agent.models.client import OllamaClient
+
+
+def _setup() -> int:
+    """Create the per-user config directory and persist safe defaults.
+
+    Offline only: no model download, no network probe, existing state preserved.
+    """
+    from agent.config import (
+        DEFAULT_MODEL,
+        DEFAULT_PROVIDER,
+        load_tui_state,
+        save_tui_state,
+        tui_state_path,
+    )
+
+    path = tui_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
+    existing = load_tui_state(path)
+    defaults = {"provider": DEFAULT_PROVIDER, "model": DEFAULT_MODEL, "mode": "AUTO"}
+    merged = {**defaults, **existing}
+    save_tui_state(merged, path)
+    print("A.S.C.S. setup complete.")
+    print("Configuration:", path)
+    print("Provider:", merged.get("provider"), "Model:", merged.get("model"))
+    print("Next: ascs doctor, then ascs to launch the terminal interface.")
+    return 0
+
+
+def _doctor(workspace: str | None = None) -> int:
+    from agent.main import build_config
+
+    args = build_parser().parse_args(["--doctor"])
+    if workspace:
+        args.workspace = workspace
+    return _cmd_doctor(build_config(args))
 
 ASCII_BANNER = r"""
     █████╗ ███████╗ ██████╗███████╗
@@ -67,8 +107,20 @@ def normalize_argv(argv: list[str] | None) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     """Start A.S.C.S. as a terminal-native application."""
+    from agent import pi
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw and raw[0] == "setup":
+        return _setup()
+    if raw and raw[0] == "doctor":
+        return _doctor(raw[1] if len(raw) > 1 and not raw[1].startswith("-") else None)
+    if pi.enabled() or "--pi" in raw or "--pi-status" in raw:
+        from agent.main import main as task_main
+        return task_main(raw)
     normalized = normalize_argv(argv)
-    args = build_parser().parse_args(normalized)
+    parser = build_parser()
+    invoked = Path(sys.argv[0]).stem.lower()
+    parser.prog = invoked if invoked in {"ascs", "risa"} else "ascs"
+    args = parser.parse_args(normalized)
 
     try:
         # Use the existing configuration system. Do not duplicate config

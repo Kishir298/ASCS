@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url";
 import os from "node:os";
 
 const ROOT = resolve(join(dirname(fileURLToPath(import.meta.url)), ".."));
-const VENV_PYTHON = join(ROOT, ".venv", "Scripts", "python.exe");
+const VENV_PYTHON = os.platform() === "win32" ? join(ROOT, ".venv", "Scripts", "python.exe") : join(ROOT, ".venv", "bin", "python");
 // Overridable for testing (e.g. ASCS_OLLAMA_PORT=1 forces the down-path).
 const OLLAMA_HOST = process.env.ASCS_OLLAMA_HOST ?? "127.0.0.1";
 const OLLAMA_PORT = Number(process.env.ASCS_OLLAMA_PORT ?? 11434);
@@ -262,6 +262,11 @@ async function checkModels() {
 async function main() {
   const rawArgs = process.argv.slice(2);
   process.chdir(ROOT);
+  if (rawArgs.includes("--pi") || process.env.ASCS_PI_MODE === "1" || (os.platform() === "linux" && os.arch() === "arm64")) {
+    // Pi setup is explicit; never start servers, install dependencies, or
+    // override the selected small model with the legacy 30B preflight.
+    process.exit(runForeground(VENV_PYTHON, ["-m", "agent.main", ...rawArgs]));
+  }
   ensureVenv();
 
   if (rawArgs.includes("--test")) {

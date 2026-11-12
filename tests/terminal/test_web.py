@@ -137,7 +137,7 @@ def test_task_runner_runs_to_completion(tmp_path):
 
 
 def test_task_runner_rejects_second_task_while_busy(tmp_path):
-    blocking = threading.Event()
+    _blocking = threading.Event()
     keep = {"busy": True}
 
     class BlockingClient:

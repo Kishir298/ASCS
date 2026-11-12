@@ -40,7 +40,7 @@ def test_ascs1_predictable_temp_file_no_external_overwrite(tmp_path, config):
     temp_name.symlink_to(external_file)
     
     # Try to write - should not follow symlink and overwrite external file
-    result = execute_tool("write_file", {"path": "target.txt", "content": "new content"}, ws, config)
+    _result = execute_tool("write_file", {"path": "target.txt", "content": "new content"}, ws, config)
     
     # The write should succeed (or fail safely) but external file must be untouched
     assert external_file.read_text() == "EXTERNAL CONTENT - SHOULD NOT BE OVERWRITTEN", \
@@ -64,7 +64,7 @@ def test_ascs1_apply_patch_predictable_temp_no_external_overwrite(tmp_path, conf
     temp_name = target_file.with_name(target_file.name + ".risa_tmp")
     temp_name.symlink_to(external_file)
     
-    result = execute_tool(
+    _result = execute_tool(
         "apply_patch",
         {"path": "target.txt", "old_text": "original", "new_text": "patched"},
         ws,
@@ -102,7 +102,7 @@ def test_ascs2_copy_destination_validated(tmp_path, config):
     
     # Copy source to destination directory - should expand to dest/source.txt
     # and validate the final target
-    result = execute_tool(
+    _result = execute_tool(
         "copy_file",
         {"path": "source.txt", "destination": "dest"},
         ws,
@@ -201,7 +201,7 @@ def test_ascs5_verification_commands_respect_intent(tmp_path, config):
         max_verify_retries = 0
     
     # Create a task with project_inspection intent (read-only)
-    task = Task(
+    _task = Task(
         id="test-1",
         title="Inspect task",
         kind="inspect",

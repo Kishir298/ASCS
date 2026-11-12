@@ -224,6 +224,9 @@ class AgentLoop:
         should_stop: Callable[[], bool] | None = None,
         tracker: StateTracker | None = None,
     ) -> None:
+        from agent.pi import enabled
+        if enabled():
+            raise RuntimeError("Pi agent tools disabled: use generation-only CLI until an OS sandbox is validated")
         self.config = config
         self.client = client
         self.ws = workspace
@@ -644,7 +647,7 @@ class AgentLoop:
                     self._repeat_count = 0
 
                 self._last_call = (reply.tool, tuple(sorted(reply.arguments.items())))
-                display_args = _json.dumps(reply.arguments, sort_keys=True)
+                _display_args = _json.dumps(reply.arguments, sort_keys=True)
 
                 result = self._run_tool(reply.tool, reply.arguments, iteration)
 

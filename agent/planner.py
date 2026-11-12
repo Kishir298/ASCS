@@ -2,4 +2,4 @@
 
 from __future__ import annotations
 
-from agent.planning.planner import *
+from agent.planning.planner import *  # noqa: F403 - legacy compatibility re-export

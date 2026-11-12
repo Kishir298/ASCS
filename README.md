@@ -1,3 +1,7 @@
+# Raspberry Pi document update 6 November 2026
+
+See [ASCS Pi handoff](docs/ASCS-Pi-Update-2026-11-06.md). The new installed `ascs` command supports experimental Pi generation-only mode with resource admission. No Pi tool execution or hardware performance is certified.
+
 # A.S.C.S. — A Smart Coding System
 
 A local, private, autonomous coding agent built on **Ollama**. It plans,
@@ -28,12 +32,12 @@ real STOP/cancellation.
   `http://localhost:11434`)
 - A code model, e.g. `ollama pull qwen3-coder:30b` (the default model, 30B coder ~19 GB; fallback `ollama pull qwen2.5-coder:14b` for 16 GB)
 
-> **Platform note:** The full runtime (`risa --ui` / `--tui`, Ollama) is
-> **Windows-only** (32 GB recommended target). **Dev testing (`pytest`) is
-> cross-platform:** on macOS/Linux `python` transparently falls back to
-> `python3` at execution time (`agent/tools/core.py:534`), so `pytest` passes
-> inside or outside a venv. Use `.venv/bin/python -m pytest -q` on any OS for
-> the canonical run.
+> **Platform note:** The runtime (`ascs` / `risa`, Ollama, TUI) runs on
+> **Windows and on macOS/Linux**. Windows is the primary validated target
+> (32 GB recommended); on POSIX, commands execute through `/bin/sh` and the
+> TUI uses stdlib `curses`. `python` transparently falls back to `python3`
+> where only the latter exists, so `pytest` passes inside or outside a venv.
+> Use `.venv/bin/python -m pytest -q` on any OS for the canonical run.
 
 ## Install (Windows PowerShell)
 
@@ -360,7 +364,7 @@ python -m pip install -r requirements.txt   # or: python -m pip install -e ".[de
 python -m pytest                            # venv python on Windows; macOS/Linux devs: .venv/bin/python -m pytest -q (python -> python3 fallback automatic)
 ```
 
-> Cross-platform dev: `pytest` is cross-platform (macOS/Linux fallback `python` -> `python3` is automatic in `agent/tools/core.py:534`). The full runtime (`risa --ui`/`--tui`) remains Windows-only.
+> Cross-platform: the runtime runs on Windows and macOS/Linux (POSIX commands execute through `/bin/sh`, `python` -> `python3` fallback is automatic). Windows remains the primary validated target; the TUI needs a curses-capable terminal.
 
 All tests run offline against scripted fake clients and an in-process mock
 Ollama server — **no Ollama required**. The skipped tests are the opt-in live

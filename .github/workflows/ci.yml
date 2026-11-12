@@ -8,8 +8,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13']
+        python-version: ['3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,3 +27,28 @@ jobs:
       - name: Run tests
         run: |
           python -m pytest -o addopts= -q --tb=no
+  platform-smoke:
+    name: Smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      AGENT_TUI_STATE_PATH: ${{ runner.temp }}/ascs-tui-state.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Verify installed command from another directory
+        working-directory: ${{ runner.temp }}
+        shell: bash
+        run: |
+          ascs --help
+          ascs setup
+          ascs doctor "${{ github.workspace }}"

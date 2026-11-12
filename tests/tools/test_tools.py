@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
@@ -174,6 +175,19 @@ def test_run_command_failure_nonzero(tmp_path, config):
         config,
     )
     assert r.ok or r.error  # nonzero exit is reported, not thrown
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shell semantics")
+def test_run_command_posix_runs_compound_commands(tmp_path, config):
+    """POSIX commands go through the shell, so `a && b` behaves like cmd.exe."""
+    r = execute_tool(
+        "run_command",
+        {"command": "echo first && echo second"},
+        Workspace(tmp_path),
+        config,
+    )
+    assert r.ok
+    assert "first" in r.output and "second" in r.output
 
 
 def test_run_command_timeout_is_a_failure(tmp_path, config):

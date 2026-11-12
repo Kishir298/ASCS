@@ -12,9 +12,10 @@ dependencies are the standard library plus `windows-curses` on Windows.
   `qwen2.5-coder:14b` (never `qwen3-coder:14b`).
 - Chunking is model-specific: 30b → 8192 tokens, 14b → 4096 tokens
   (`agent/context/index.py`, dual limits). No global chunk size.
-- Runtime is Windows-only (`risa --tui`, Ollama); dev testing (`pytest`) is
-  cross-platform via the `python → python3` fallback in
-  `agent/tools/core.py:507` (_python_fallback_command).
+- Runtime runs on Windows and macOS/Linux (`ascs`/`risa`, Ollama, curses
+  TUI). Windows is the primary validated target; on POSIX commands execute
+  through `/bin/sh` and the `python → python3` fallback applies
+  (`agent/tools/core.py`, `_python_fallback_command`).
 - Terminal-native: `risa` defaults to the curses TUI. `--ui` is a compat alias
   for `--tui`. Browser serving (`agent/web.py` HTTP/SSE + deleted
   `agent/ui/index.html`) is legacy; `EventHub`/`TaskRunner` in `web.py` remain
