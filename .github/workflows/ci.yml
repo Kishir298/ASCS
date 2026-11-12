@@ -23,7 +23,26 @@ jobs:
       - name: Run lint
         run: |
           pip install ruff
-          ruff check --select F agent tests
+          ruff check --select E9,F,I agent tests
+      - name: Run tests
+        run: |
+          python -m pytest -o addopts= -q --tb=no
+  test-windows:
+    name: Windows full test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run lint
+        run: |
+          pip install ruff
+          ruff check --select E9,F,I agent tests
       - name: Run tests
         run: |
           python -m pytest -o addopts= -q --tb=no

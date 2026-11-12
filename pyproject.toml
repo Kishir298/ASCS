@@ -25,3 +25,6 @@ include = ["agent*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff.lint]
+select = ["E9", "F", "I"]
