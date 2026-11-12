@@ -1,9 +1,12 @@
 import json
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
 from agent import pi
+
+linux_only=pytest.mark.skipif(sys.platform!='linux',reason='Pi inference lock requires fcntl')
 
 
 def resources(available=6,cpu=10,pressure=0,temp=45):
@@ -41,6 +44,7 @@ def test_nested_cgroup(tmp_path):
     assert pi.effective_available(proc,cg)==pi.GIB
 
 
+@linux_only
 def test_lock(tmp_path):
     lock=tmp_path/'lock';lock.touch()
     with pi.inference_slot(lock):
@@ -73,6 +77,7 @@ def fixture(monkeypatch,tmp_path):
     return args,calls,path
 
 
+@linux_only
 def test_generate(monkeypatch,tmp_path,capsys):
     args,calls,_=fixture(monkeypatch,tmp_path)
     assert pi.run(args)==0
@@ -82,6 +87,7 @@ def test_generate(monkeypatch,tmp_path,capsys):
     assert not (tmp_path/'.ascs').exists()
 
 
+@linux_only
 @pytest.mark.parametrize('change',['digest','unverified','context'])
 def test_unapproved(monkeypatch,tmp_path,change):
     args,calls,path=fixture(monkeypatch,tmp_path);data=json.loads(path.read_text())
@@ -92,12 +98,14 @@ def test_unapproved(monkeypatch,tmp_path,change):
     assert not any(p=='/api/chat' for p,_ in calls)
 
 
+@linux_only
 def test_pressure_no_generate(monkeypatch,tmp_path):
     args,calls,_=fixture(monkeypatch,tmp_path);monkeypatch.setattr(pi,'sample_resources',lambda:resources(cpu=90))
     assert pi.run(args)==75
     assert not any(p=='/api/chat' for p,_ in calls)
 
 
+@linux_only
 def test_cancel(monkeypatch,tmp_path):
     args,_,_=fixture(monkeypatch,tmp_path)
     monkeypatch.setattr(pi,'sample_resources',lambda:(_ for _ in ()).throw(KeyboardInterrupt()))
@@ -114,6 +122,7 @@ def test_guard(monkeypatch,tmp_path):
     assert main(['--workspace',str(tmp_path),'--mode','auto','--','edit project'])==1
 
 
+@linux_only
 def test_explicit_switch_only_approved_resident(monkeypatch,tmp_path):
     args,calls,path=fixture(monkeypatch,tmp_path)
     data=json.loads(path.read_text());data['old:tag']={'digest':'b'*64};path.write_text(json.dumps(data))
@@ -132,6 +141,7 @@ def test_explicit_switch_only_approved_resident(monkeypatch,tmp_path):
     assert ('/api/generate',{'model':'old:tag','keep_alive':0}) in calls
 
 
+@linux_only
 def test_unknown_resident_not_unloaded(monkeypatch,tmp_path):
     args,calls,_=fixture(monkeypatch,tmp_path);args.pi_unload_previous=True
     original=pi.LocalOllama
@@ -144,6 +154,7 @@ def test_unknown_resident_not_unloaded(monkeypatch,tmp_path):
     assert not any(path in ('/api/generate','/api/chat') for path,_ in calls)
 
 
+@linux_only
 def test_cloud_tag_never_receives_prompt(monkeypatch,tmp_path):
     args,calls,_=fixture(monkeypatch,tmp_path)
     original=pi.LocalOllama

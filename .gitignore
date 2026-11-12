@@ -37,6 +37,17 @@ device.json
 # A.S.C.S. runtime state (regenerated on run)
 .ascs/
 
+# Local SQLite databases / journals (never commit runtime data)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
 # Local model scratch outputs (Option C, gitignored, never committed)
 ascs_demo_hello.txt
 Ollama_tests/
