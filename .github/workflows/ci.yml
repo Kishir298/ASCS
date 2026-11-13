@@ -1,7 +1,9 @@
 name: CI
 on:
   push:
-    branches: [main]
+    # Feature and fix branches are validated on push so a candidate commit has
+    # evidence before a pull request exists.
+    branches: [main, 'feat/**', 'fix/**']
   pull_request:
     branches: [main]
 jobs:
@@ -53,8 +55,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-    env:
-      AGENT_TUI_STATE_PATH: ${{ runner.temp }}/ascs-tui-state.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -67,6 +67,10 @@ jobs:
       - name: Verify installed command from another directory
         working-directory: ${{ runner.temp }}
         shell: bash
+        # `runner` is not a valid context in job-level env, so the runner's
+        # scratch directory is resolved here instead.
+        env:
+          AGENT_TUI_STATE_PATH: ${{ runner.temp }}/ascs-tui-state.json
         run: |
           ascs --help
           ascs setup
