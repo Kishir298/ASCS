@@ -50,13 +50,14 @@ def _setup() -> int:
     return 0
 
 
-def _doctor(workspace: str | None = None) -> int:
+def _doctor(workspace: str | None = None, *, offline: bool = False) -> int:
     from agent.main import build_config
 
-    args = build_parser().parse_args(["--doctor"])
+    argv = ["--doctor"] + (["--offline"] if offline else [])
+    args = build_parser().parse_args(argv)
     if workspace:
         args.workspace = workspace
-    return _cmd_doctor(build_config(args))
+    return _cmd_doctor(build_config(args), offline=offline)
 
 ASCII_BANNER = r"""
     █████╗ ███████╗ ██████╗███████╗
@@ -112,7 +113,11 @@ def main(argv: list[str] | None = None) -> int:
     if raw and raw[0] == "setup":
         return _setup()
     if raw and raw[0] == "doctor":
-        return _doctor(raw[1] if len(raw) > 1 and not raw[1].startswith("-") else None)
+        offline = "--offline" in raw[1:]
+        workspace = next(
+            (arg for arg in raw[1:] if not arg.startswith("-")), None
+        )
+        return _doctor(workspace, offline=offline)
     if pi.enabled() or "--pi" in raw or "--pi-status" in raw:
         from agent.main import main as task_main
         return task_main(raw)
@@ -149,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_check(client)
 
     if args.doctor:
-        return _cmd_doctor(config)
+        return _cmd_doctor(config, offline=getattr(args, "offline", False))
 
     try:
         # Box-drawing banner needs UTF-8; legacy consoles (cp1252/cp437)

@@ -224,6 +224,12 @@ def build_parser() -> argparse.ArgumentParser:
         "workspace, Ollama, model, tools, context, git, tests), then exit.",
     )
     parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="With --doctor: skip network/Ollama probes for an offline install "
+        "smoke test. Local checks still run and still fail the command.",
+    )
+    parser.add_argument(
         "--list-models",
         action="store_true",
         help="List models installed on the Ollama server, then exit.",
@@ -305,7 +311,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         return _cmd_check(client)
     if args.doctor:
-        return _cmd_doctor(config)
+        return _cmd_doctor(config, offline=getattr(args, "offline", False))
 
     # -- web UI mode --------------------------------------------------------
     if args.ui:
@@ -463,10 +469,10 @@ def _cmd_check(client: OllamaClient) -> int:
     return 0
 
 
-def _cmd_doctor(config) -> int:
+def _cmd_doctor(config, offline: bool = False) -> int:
     from .doctor import doctor, print_doctor
 
-    report = doctor(workspace=config.workspace)
+    report = doctor(workspace=config.workspace, offline=offline)
     print_doctor(report)
     return 0 if report.ok else 1
 

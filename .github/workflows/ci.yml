@@ -70,4 +70,7 @@ jobs:
         run: |
           ascs --help
           ascs setup
-          ascs doctor "${{ github.workspace }}"
+          # CI runners have no Ollama server, so the install smoke validates
+          # every local check and explicitly skips the reachability probes.
+          # Live Ollama validation runs in live-tests.yml on a provisioned runner.
+          ascs doctor --offline "${{ github.workspace }}"

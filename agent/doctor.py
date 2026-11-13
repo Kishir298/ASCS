@@ -309,12 +309,17 @@ def _check_tests(cfg: AgentConfig) -> CheckResult:
     return CheckResult("tests", PASS, "pytest available")
 
 
-def doctor(*, workspace: str | Path | None = None, **config_overrides) -> DoctorReport:
+def doctor(*, workspace: str | Path | None = None, offline: bool = False, **config_overrides) -> DoctorReport:
     """Run the read-only diagnostic suite for a workspace.
 
     A config error is reported as a ``config`` FAIL, but the remaining checks
     still run against a best-effort configuration so the report surfaces every
     problem at once (e.g. a missing workspace is still diagnosed).
+
+    ``offline`` skips the checks that need a reachable Ollama server. Every
+    local check still runs and still determines the exit status; the skipped
+    probes are reported explicitly so the result is never mistaken for a
+    fully validated deployment.
     """
     results: list[CheckResult] = []
 
@@ -342,9 +347,18 @@ def doctor(*, workspace: str | Path | None = None, **config_overrides) -> Doctor
     results.append(_check_python())
     results.append(_check_install())
     results.append(_check_workspace(cfg))
-    results.append(_check_ollama(cfg))
-    results.append(_check_model(cfg))
-    results.append(_check_model_query(cfg))
+    if offline:
+        results.append(
+            CheckResult(
+                "ollama",
+                WARN,
+                f"Offline mode (--offline): skipped reachability probes for {cfg.ollama_base_url}.",
+            )
+        )
+    else:
+        results.append(_check_ollama(cfg))
+        results.append(_check_model(cfg))
+        results.append(_check_model_query(cfg))
     results.append(_check_tools())
     results.append(_check_context_index(cfg))
     results.append(_check_project(cfg))

@@ -162,6 +162,69 @@ def test_print_doctor_renders_statuses(tmp_path, patch_ollama, capsys):
 def test_parser_has_doctor_flag():
     ns = build_parser().parse_args(["--doctor"])
     assert ns.doctor is True
+    assert ns.offline is False
+
+
+def test_parser_has_offline_flag():
+    ns = build_parser().parse_args(["--doctor", "--offline"])
+    assert ns.doctor is True
+    assert ns.offline is True
+
+
+def test_doctor_offline_skips_external_probes(tmp_path, patch_ollama):
+    """--offline must not pretend Ollama passed; it reports the skip instead."""
+    patch_ollama(verify_error="connection refused")
+    report = doctor(workspace=tmp_path, offline=True)
+    assert report.ok
+    names = {r.name for r in report.results}
+    assert "ollama" in names
+    assert "model" not in names
+    assert "model_query" not in names
+    ollama = next(r for r in report.results if r.name == "ollama")
+    assert ollama.status == "WARN"
+    assert "offline" in ollama.message.lower()
+    assert report.failed == []
+
+
+def test_doctor_offline_still_fails_broken_local_checks(tmp_path, patch_ollama):
+    """Offline mode relaxes only the network probes, never local validation."""
+    patch_ollama()
+    report = doctor(workspace=tmp_path / "missing", offline=True)
+    assert not report.ok
+    workspace = next(r for r in report.results if r.name == "workspace")
+    assert workspace.status == "FAIL"
+
+
+def test_installed_doctor_subcommand_accepts_offline(tmp_path, monkeypatch):
+    """`ascs doctor --offline <workspace>` is the CI install smoke."""
+    class _ExplodingClient:
+        def __init__(self, *a, **kw):
+            raise AssertionError("offline doctor must not construct an Ollama client")
+
+    monkeypatch.setattr("agent.doctor.OllamaClient", _ExplodingClient)
+    monkeypatch.setattr(
+        "agent.doctor._check_context_index",
+        lambda cfg: doctor_mod.CheckResult("context", "PASS", "ok"),
+    )
+    from agent.terminal.entry import main as entry_main
+
+    assert entry_main(["doctor", "--offline", str(tmp_path)]) == 0
+
+
+def test_cmd_doctor_offline_never_contacts_ollama(tmp_path, monkeypatch):
+    class _ExplodingClient:
+        def __init__(self, *a, **kw):
+            raise AssertionError("offline doctor must not construct an Ollama client")
+
+    monkeypatch.setattr("agent.doctor.OllamaClient", _ExplodingClient)
+    monkeypatch.setattr(
+        "agent.doctor._check_context_index",
+        lambda cfg: doctor_mod.CheckResult("context", "PASS", "ok"),
+    )
+    from agent.main import main
+
+    rc = main(["--doctor", "--offline", "--workspace", str(tmp_path)])
+    assert rc == 0
 
 
 def test_cmd_doctor_returns_zero_when_ok(tmp_path, monkeypatch):
